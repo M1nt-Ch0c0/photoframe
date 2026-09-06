@@ -1,77 +1,52 @@
-"""Verify the independent app entry's input gate, output and result contract."""
+"""Execute the actual autonomous ABI 2 color app, including both palettes."""
 import ctypes
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-
-ROOT = Path(__file__).resolve().parent
-COMPONENT = ROOT.parents[1] / 'components/photoframe'
-MOCK = r'''
-#include <stdlib.h>
-#include <stdint.h>
-static int decoded, rendered, report, decode_result, render_result;
-static unsigned char captured[192000];
-const uint8_t *photoframe_host_png_data(void) { return (const uint8_t *)"fixture"; }
-size_t photoframe_host_png_size(void) { return 7; }
-void photoframe_host_report_result(int r) { report = r; }
-int photoframe_decode_png(const uint8_t *p, size_t n, uint8_t **out) {
-    if (!p || n != 7) abort();
-    ++decoded; *out = decode_result ? NULL : malloc(192000); return decode_result;
-}
-int photoframe_e6_render(const uint8_t *p, size_t n) {
-    if (n != sizeof(captured)) abort();
-    for (size_t i=0; i<n; ++i) captured[i]=p[i];
-    ++rendered; return render_result;
-}
-void reset(int d, int r) { decoded = rendered = report = 0; decode_result=d; render_result=r; }
-int render_calls(void) { return rendered; }
-int reported(void) { return report; }
-int pixel(int x, int y) {
-    unsigned char b=captured[192000-1-(y*800+x)/2];
-    return x%2 ? b>>4 : b&15;
-}
+ROOT=Path(__file__).resolve().parent
+SDK=ROOT.parents[1]/"components/app_sdk/include"
+MOCK=r'''
+#include "photopainter_app.h"
+#include <assert.h>
+#include <string.h>
+static app_context_v2_t c;
+static int renders,result,reported,flags,reports;
+static uint8_t captured[APP_FRAME_BYTES];
+const app_context_v2_t *app_host_context_v2(void){return &c;}
+void app_host_complete_v2(const app_result_v2_t *r){assert(r->event_id==c.event_id&&r->generation==c.generation);reports++;reported=r->status;flags=r->flags;}
+int32_t app_host_display_v2(const uint8_t *p,uint32_t n){assert(n==APP_FRAME_BYTES);memcpy(captured,p,n);renders++;return result;}
+void reset(int event,int r){c=(app_context_v2_t){.event=event,.event_id=123,.generation=7};renders=reports=reported=flags=0;result=r;}
+int render_calls(void){return renders;}
+int report_count(void){return reports;}
+int reported_result(void){return reported;}
+int ready(void){return flags;}
+int pixel(int x,int y){return captured[y*800+x];}
 '''
-
-
 class ColorTestEntryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.tmp = tempfile.TemporaryDirectory()
-        mock = Path(cls.tmp.name)/'mock.c'; mock.write_text(MOCK)
-        cls.libs = []
-        for reverse in (0, 1):
-            out = Path(cls.tmp.name)/f'entry-{reverse}.dylib'
-            subprocess.run(['cc','-shared','-fPIC','-Wall','-Wextra','-Werror',
-                '-Dmain=color_test_entry', f'-DCOLOR_TEST_REVERSE={reverse}',
-                '-I'+str(COMPONENT/'include'), '-I'+str(COMPONENT/'private_include'),
-                str(ROOT/'main/entry.c'),str(mock),'-o',str(out)], check=True)
+        cls.tmp=tempfile.TemporaryDirectory();mock=Path(cls.tmp.name)/"mock.c";mock.write_text(MOCK);cls.libs=[]
+        for reverse in (0,1):
+            out=Path(cls.tmp.name)/f"entry-{reverse}.dylib"
+            subprocess.run(["cc","-shared","-fPIC","-Wall","-Wextra","-Werror","-Dmain=color_test_entry",
+                f"-DCOLOR_TEST_REVERSE={reverse}","-I"+str(SDK),str(ROOT/"main/entry.c"),str(mock),"-o",str(out)],check=True)
             cls.libs.append(ctypes.CDLL(str(out)))
-
     @classmethod
-    def tearDownClass(cls): cls.tmp.cleanup()
-
-    def test_rejects_input_before_any_display_io(self):
-        for lib in self.libs:
-            for error in (-1,-2,-3,-4,-5):
-                lib.reset(error,0)
-                self.assertEqual(lib.color_test_entry(0,None),error)
-                self.assertEqual(lib.render_calls(),0)
-                self.assertEqual(lib.reported(),error)
-
-    def test_distinct_chart_versions_and_correct_180_degree_packing(self):
-        palette=[0,1,2,3,5,6]
+    def tearDownClass(cls):cls.tmp.cleanup()
+    def test_start_generates_complete_logical_chart_without_input(self):
         for reverse,lib in enumerate(self.libs):
-            lib.reset(0,0)
-            self.assertEqual(lib.color_test_entry(0,None),0)
-            self.assertEqual(lib.render_calls(),1)
+            lib.reset(1,0);self.assertEqual(lib.color_test_entry(0,None),0)
+            self.assertEqual((lib.render_calls(),lib.report_count(),lib.ready()),(1,1,1))
             for y in (0,239,479):
                 for x in range(800):
-                    band=x*6//800
-                    self.assertEqual(lib.pixel(x,y),palette[5-band if reverse else band])
-
-    def test_display_failure_is_reported_without_false_success(self):
+                    color=x*6//800;self.assertEqual(lib.pixel(x,y),5-color if reverse else color)
+    def test_input_is_unsupported_and_stop_never_displays(self):
         for lib in self.libs:
-            lib.reset(0,-7)
-            self.assertEqual(lib.color_test_entry(0,None),-7)
-            self.assertEqual(lib.reported(),-7)
+            for event,result in ((2,-9),(3,0),(4,0),(5,0)):
+                lib.reset(event,0);self.assertEqual(lib.color_test_entry(0,None),result)
+                self.assertEqual((lib.render_calls(),lib.report_count(),lib.ready()),(0,1,0))
+    def test_display_failure_never_reports_ready(self):
+        for lib in self.libs:
+            lib.reset(1,-7);self.assertEqual(lib.color_test_entry(0,None),-7)
+            self.assertEqual((lib.reported_result(),lib.ready()),(-7,0))

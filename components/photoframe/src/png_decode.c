@@ -89,9 +89,9 @@ static int color_code(uint8_t red, uint8_t green, uint8_t blue)
     return -1;
 }
 
-int photoframe_decode_png(const uint8_t *png_data,
+static int decode_png(const uint8_t *png_data,
                           size_t png_size,
-                          uint8_t **wire_data)
+                          uint8_t **wire_data, bool logical)
 {
     if (png_data == NULL || wire_data == NULL || png_size < 8u) {
         return PHOTOFRAME_ERR_ARGUMENT;
@@ -207,7 +207,7 @@ int photoframe_decode_png(const uint8_t *png_data,
     }
 
     row = malloc((size_t)row_bytes);
-    wire = malloc(PHOTOFRAME_FRAME_BYTES);
+    wire = malloc(logical ? PHOTOFRAME_WIDTH*PHOTOFRAME_HEIGHT : PHOTOFRAME_FRAME_BYTES);
     if (row == NULL || wire == NULL) {
         result = PHOTOFRAME_ERR_ALLOCATION;
         goto cleanup;
@@ -240,8 +240,13 @@ int photoframe_decode_png(const uint8_t *png_data,
                 ((size_t)y * PHOTOFRAME_WIDTH + (size_t)x) / 2u;
             uint8_t packed = (uint8_t)(((uint8_t)first << 4) |
                                        (uint8_t)second);
-            wire[PHOTOFRAME_FRAME_BYTES - 1u - source_byte] =
-                (uint8_t)((packed << 4) | (packed >> 4));
+            if (logical) {
+                wire[source_byte*2] = first > 3 ? first-1 : first;
+                wire[source_byte*2+1] = second > 3 ? second-1 : second;
+            } else {
+                wire[PHOTOFRAME_FRAME_BYTES - 1u - source_byte] =
+                    (uint8_t)((packed << 4) | (packed >> 4));
+            }
         }
     }
 
@@ -261,4 +266,11 @@ cleanup:
     png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
     free(allocator);
     return result;
+}
+
+int photoframe_decode_png(const uint8_t *data,size_t size,uint8_t **out) {
+    return decode_png(data,size,out,false);
+}
+int photoframe_decode_indexed(const uint8_t *data,size_t size,uint8_t **out) {
+    return decode_png(data,size,out,true);
 }

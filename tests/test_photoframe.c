@@ -214,6 +214,9 @@ static void expect_no_display(const memory_png_t *png, int expected)
     reset_display_stub(PHOTOFRAME_OK);
     assert(photoframe_render_png(png->data, png->size) == expected);
     assert(display_calls == 0);
+    uint8_t *logical=NULL;
+    assert(photoframe_decode_indexed(png->data,png->size,&logical)==expected);
+    assert(logical==NULL);
 }
 
 int main(void)
@@ -243,6 +246,17 @@ int main(void)
     assert(photoframe_render_png(valid.data, valid.size) == PHOTOFRAME_OK);
     assert(display_calls == 1);
 
+    uint8_t *logical=NULL,*packed=NULL;
+    assert(photoframe_decode_indexed(valid.data,valid.size,&logical)==PHOTOFRAME_OK);
+    assert(photoframe_decode_png(valid.data,valid.size,&packed)==PHOTOFRAME_OK);
+    const uint8_t codes[]={0,1,2,3,5,6};
+    for(size_t i=0;i<800u*480u;i+=2) {
+        assert(logical[i]<6&&logical[i+1]<6);
+        assert(packed[PHOTOFRAME_FRAME_BYTES-1-i/2]==(codes[logical[i+1]]<<4|codes[logical[i]]));
+    }
+    assert(logical[0]==3&&logical[1]==4);
+    assert(logical[800u*480u-2]==2&&logical[800u*480u-1]==5);
+    free(logical);free(packed);
     reset_display_stub(PHOTOFRAME_ERR_BUSY_TIMEOUT);
     assert(photoframe_render_png(valid.data, valid.size) ==
            PHOTOFRAME_ERR_BUSY_TIMEOUT);
