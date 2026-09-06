@@ -4,7 +4,9 @@
 
 四个仓库的职责、架构图、耦合边界与修改影响，见 [PhotoPainter 架构总览](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/ARCHITECTURE.md)。
 
-## 刷写
+默认 `.app.elf` 已使用 ABI 2：启动时恢复缓存或显示 `WAITING FOR IMAGE`，收到 PNG 后更新屏幕；宿主负责六色逻辑帧的板级显示。必须先部署支持 ABI 2 的新宿主。完整规则见 [运行层指南](https://github.com/M1nt-Ch0c0/photopainter-host/blob/codex/multi-wifi-apps/docs-runtime-v2.md)。
+
+## 构建与安装
 
 本仓库为 7.3 英寸、800×480、六色 Spectra 6 PhotoPainter 提供独立可加载组件，不是整机固件。使用 ESP-IDF commit `5e6f53cdb31fe5708eae3f55af9737be2822db22`（约 v6.0.3），分别构建应用 ELF 与共享对象：
 
@@ -27,6 +29,8 @@ idf.py -B build-so -DIDF_TARGET=esp32s3 \
 cmake -S tests -B tests/build
 cmake --build tests/build
 ctest --test-dir tests/build --output-on-failure
+python3 -m unittest discover -s tests -p 'test_*.py'
+python3 -m unittest discover -s examples/color-test -p 'test_*.py'
 ```
 
 显示引脚和 E6 初始化、刷新、关断时序取自 Waveshare [`ESP32-S3-PhotoPainter` commit `a5e8f757`](https://github.com/waveshareteam/ESP32-S3-PhotoPainter/tree/a5e8f757ba0cafbb5586f07d3e83bda3184c0845/01_Example/xiaozhi-esp32)。SCLK/MOSI/DC/CS/RST/BUSY 固定为 GPIO 10/11/8/9/12/13；AXP2101 通过 GPIO 48/47 上的 I2C0 验证芯片 ID，配置并回读 ALDO4 3.3 V 后才允许访问 EPD GPIO/SPI。上游 MIT notice 保存在 `LICENSES/Waveshare-PhotoPainter-MIT.txt`，本仓库原创代码使用 `LICENSE` 中的 MIT 许可。
@@ -41,7 +45,7 @@ int photoframe_render_png(const uint8_t *png_data, size_t png_size);
 
 宿主必须串行调用；输入在返回前保持有效。PNG 不得超过 5 MiB，必须恰好 800×480、非隔行，并且每个像素只能是完全不透明的黑 `#000000`、白 `#ffffff`、黄 `#ffff00`、红 `#ff0000`、蓝 `#0000ff`、绿 `#00ff00`。组件会完整解码、验色并拒绝尾随数据，然后执行 180° 像素打包；验证失败不会接触面板。成功仅在最终 POWER_OFF 的 BUSY 等待完成后返回。
 
-应用 ELF 另由宿主解析三个符号：
+仅旧 ABI 1（显式 `-DPHOTOFRAME_ABI=1` 构建）由宿主解析下列三个符号。默认 ABI 2 使用 `components/app_sdk/include/photopainter_app.h` 的事件与宿主服务，PNG 解码后生成 384000 字节逻辑帧，由宿主执行唯一的旋转和硬件刷新：
 
 ```c
 const uint8_t *photoframe_host_png_data(void);
@@ -70,4 +74,4 @@ void photoframe_host_report_result(int result);
 
 ## 独立第二应用示例
 
-[color-test](examples/color-test/README.md) 是独立构建和安装的六色色条应用，可用于验证多个应用各自的 A/B 更新、切换与回退。它复用本仓库的显示驱动，不修改原 photoframe 入口。
+[color-test](examples/color-test/README.md) 是独立构建和安装的六色色条应用，可用于验证多个应用各自的 A/B 更新、切换与回退。它在 START 自主绘制色带，使用宿主显示服务，不接受 PNG，也不修改原 photoframe 入口。另有 [无显示生命周期示例](examples/lifecycle/README.md)。

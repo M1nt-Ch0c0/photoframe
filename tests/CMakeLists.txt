@@ -18,7 +18,7 @@ target_include_directories(
         ../components/photoframe/include
         ../components/photoframe/private_include
 )
-target_link_libraries(photoframe_native_tests PRIVATE PNG::PNG)
+target_link_libraries(photoframe_native_tests PRIVATE PNG::PNG ZLIB::ZLIB)
 target_compile_options(photoframe_native_tests PRIVATE -Wall -Wextra)
 
 enable_testing()

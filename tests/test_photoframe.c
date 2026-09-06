@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include <png.h>
+#include <zlib.h>
 
 #include "photoframe.h"
 #include "photoframe_internal.h"
@@ -304,6 +305,24 @@ int main(void)
     memcpy(trailing.data, valid.data, valid.size);
     trailing.data[valid.size] = 0;
     expect_no_display(&trailing, PHOTOFRAME_ERR_PNG);
+
+    /* Protocol maximum remains valid with a large ignored ancillary chunk.
+     * Decode first, so this verifies the real decoder without panel I/O. */
+    size_t maximum_size=5u*1024u*1024u;
+    uint8_t *maximum=calloc(1,maximum_size);
+    assert(maximum&&valid.size>=12);
+    size_t prefix=valid.size-12, padding=maximum_size-valid.size-12;
+    memcpy(maximum,valid.data,prefix);
+    uint32_t chunk_length=(uint32_t)padding;
+    for(unsigned i=0;i<4;i++)maximum[prefix+i]=(uint8_t)(chunk_length>>(24-8*i));
+    memcpy(maximum+prefix+4,"vpAg",4);
+    uint32_t crc=(uint32_t)crc32(0,maximum+prefix+4,(uInt)padding+4);
+    for(unsigned i=0;i<4;i++)maximum[prefix+8+padding+i]=(uint8_t)(crc>>(24-8*i));
+    memcpy(maximum+maximum_size-12,valid.data+valid.size-12,12);
+    logical=NULL;
+    assert(photoframe_decode_indexed(maximum,maximum_size,&logical)==PHOTOFRAME_OK);
+    assert(logical[0]==3&&logical[1]==4);
+    free(logical);free(maximum);
 
     free(valid.data);
     free(palette.data);
