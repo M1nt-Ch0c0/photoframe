@@ -67,3 +67,7 @@ void photoframe_host_report_result(int result);
 组件不保存密钥，也不实现网络鉴权。Bearer 推图码只由宿主固件校验；宿主验证鉴权、请求大小和 PNG 签名字节后，才把内存缓冲区交给本组件，完整 PNG 验证由组件在触碰面板前完成。不得把 Wi-Fi 密码、推图码、NVS 镜像或其他密钥提交到此仓库。
 
 电源映射依据：[官方原理图](https://files.waveshare.com/wiki/ESP32-S3-PhotoPainter/ESP32-S3-PhotoPainter-Schematic.pdf)中 AXP2101 的 pin 15 / ALDO4 连接 `EPD_VCC`，pin 16 / ALDO3 连接 `Audio_VCC`。屏幕电压寄存器为 `0x95`，使能为 `0x90` 的 bit 3；读改写保留其他电源位。
+
+## 独立第二应用示例
+
+[color-test](examples/color-test/README.md) 是独立构建和安装的六色色条应用，可用于验证多个应用各自的 A/B 更新、切换与回退。它复用本仓库的显示驱动，不修改原 photoframe 入口。
