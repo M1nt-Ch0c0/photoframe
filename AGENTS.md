@@ -6,7 +6,7 @@ Read this file before changing the loadable display component. For blank-machine
 
 This repository owns strict PNG decoding, six-color validation, 180-degree pixel packing, AXP2101 setup, GPIO/SPI access, official Spectra 6 E6 timing, and the `.app.elf` and `.so` deliverables. It must not own Wi-Fi, HTTP, authentication, scheduling, secrets, or a complete device firmware.
 
-The current host loads the application ELF, not the `.so`. A component change reaches hardware only after `photopainter-host` rebuilds and embeds the new `photoframe.app.elf`, then the host is flashed.
+The host loads the app ELF from independent A/B data slots. Package and stage business updates with the sibling host tools/module.py; no host rebuild is required for ABI-compatible changes. Read ../photopainter-host/docs-module-slots.md. The `.so` remains an additional artifact, not the deployed profile.
 
 ## Non-negotiable constraints
 
@@ -36,7 +36,7 @@ idf.py -B build-so -DIDF_TARGET=esp32s3 \
   -DPHOTOFRAME_ARTIFACT=so build
 ```
 
-After ABI or driver changes, inspect both artifacts and rebuild `../photopainter-host`. Do not claim real display success without an authenticated request returning 200 and human confirmation of content, orientation, and colors.
+After driver changes, inspect both artifacts and test module staging/activation/rollback. Rebuild `../photopainter-host` only when changing its fixed ABI or framework. Do not claim real display success without an authenticated request returning 200 and human confirmation of content, orientation, and colors.
 
 ## Secrets and hardware
 

@@ -11,6 +11,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "driver/gpio.h"
@@ -67,7 +68,7 @@ static const epd_setting_t EPD_INIT_SETTINGS[] = {
 static int set_level(gpio_num_t pin, uint32_t level)
 {
     return gpio_set_level(pin, level) == ESP_OK ? PHOTOFRAME_OK
-                                                 : PHOTOFRAME_ERR_IO;
+                                                : PHOTOFRAME_ERR_IO;
 }
 
 static int spi_write_byte(epd_context_t *context, uint8_t value)
@@ -82,8 +83,7 @@ static int spi_write_byte(epd_context_t *context, uint8_t value)
                : PHOTOFRAME_ERR_IO;
 }
 
-static int epd_write_byte(epd_context_t *context,
-                          uint32_t dc_level,
+static int epd_write_byte(epd_context_t *context, uint32_t dc_level,
                           uint8_t value)
 {
     int result = set_level(EPD_PIN_DC, dc_level);
@@ -110,30 +110,34 @@ static int epd_data(epd_context_t *context, uint8_t data)
     return epd_write_byte(context, 1, data);
 }
 
-static int epd_setting(epd_context_t *context,
-                       uint8_t command,
-                       const uint8_t *data,
-                       size_t length)
+static int epd_setting(epd_context_t *context, uint8_t command,
+                       const uint8_t *data, size_t length)
 {
     int result = epd_command(context, command);
-    for (size_t index = 0; result == PHOTOFRAME_OK && index < length;
-         ++index) {
+    for (size_t index = 0; result == PHOTOFRAME_OK && index < length; ++index) {
         result = epd_data(context, data[index]);
     }
     return result;
 }
 
-static int epd_wait_ready(void)
+static int epd_wait_ready(const char *stage)
 {
+    fprintf(stderr, "photoframe: wait %s BUSY=%d\n", stage,
+            gpio_get_level(EPD_PIN_BUSY));
     const TickType_t timeout = pdMS_TO_TICKS(EPD_BUSY_TIMEOUT_MS);
     const TickType_t start = xTaskGetTickCount();
 
     while (gpio_get_level(EPD_PIN_BUSY) == 0) {
         if ((TickType_t)(xTaskGetTickCount() - start) >= timeout) {
+            fprintf(stderr, "photoframe: BUSY timeout at %s\n", stage);
             return PHOTOFRAME_ERR_BUSY_TIMEOUT;
         }
         vTaskDelay(pdMS_TO_TICKS(EPD_BUSY_POLL_MS));
     }
+    fprintf(
+        stderr, "photoframe: ready %s after %lu ms\n", stage,
+        (unsigned long)((xTaskGetTickCount() - start) * portTICK_PERIOD_MS));
+
     return PHOTOFRAME_OK;
 }
 
@@ -168,11 +172,12 @@ static int epd_open(epd_context_t *context)
         return PHOTOFRAME_ERR_ALLOCATION;
     }
 
-    /* EPD_VCC is supplied by AXP2101 ALDO3.  Validate the PMIC identity,
+    /* EPD_VCC is supplied by AXP2101 ALDO4.  Validate the PMIC identity,
      * program 3.3 V, enable the rail, and verify both writes before touching
      * any EPD GPIO or initializing its SPI bus. */
     int result = photoframe_axp2101_enable_epd();
     if (result != PHOTOFRAME_OK) {
+        fprintf(stderr, "photoframe: power setup failed: %d\n", result);
         return result;
     }
 
@@ -185,8 +190,8 @@ static int epd_open(epd_context_t *context)
     }
 
     const gpio_config_t output_config = {
-        .pin_bit_mask = (1ULL << EPD_PIN_DC) | (1ULL << EPD_PIN_CS) |
-                        (1ULL << EPD_PIN_RST),
+        .pin_bit_mask =
+            (1ULL << EPD_PIN_DC) | (1ULL << EPD_PIN_CS) | (1ULL << EPD_PIN_RST),
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
@@ -219,8 +224,7 @@ static int epd_open(epd_context_t *context)
         .data7_io_num = GPIO_NUM_NC,
         .max_transfer_sz = EPD_TRANSFER_CHUNK,
     };
-    if (spi_bus_initialize(SPI3_HOST, &bus_config, SPI_DMA_CH_AUTO) !=
-        ESP_OK) {
+    if (spi_bus_initialize(SPI3_HOST, &bus_config, SPI_DMA_CH_AUTO) != ESP_OK) {
         return PHOTOFRAME_ERR_IO;
     }
     context->bus_initialized = true;
@@ -269,7 +273,9 @@ static int epd_initialize(epd_context_t *context)
     if (result != PHOTOFRAME_OK) {
         return result;
     }
-    result = epd_wait_ready();
+    fprintf(stderr, "photoframe: reset BUSY=%d\n",
+            gpio_get_level(EPD_PIN_BUSY));
+    result = epd_wait_ready("reset");
     if (result != PHOTOFRAME_OK) {
         return result;
     }
@@ -279,9 +285,7 @@ static int epd_initialize(epd_context_t *context)
          index < sizeof(EPD_INIT_SETTINGS) / sizeof(EPD_INIT_SETTINGS[0]);
          ++index) {
         const epd_setting_t *setting = &EPD_INIT_SETTINGS[index];
-        result = epd_setting(context,
-                             setting->command,
-                             setting->data,
+        result = epd_setting(context, setting->command, setting->data,
                              setting->length);
         if (result != PHOTOFRAME_OK) {
             return result;
@@ -289,11 +293,11 @@ static int epd_initialize(epd_context_t *context)
     }
 
     result = epd_command(context, 0x04);
-    return result == PHOTOFRAME_OK ? epd_wait_ready() : result;
+    return result == PHOTOFRAME_OK ? epd_wait_ready("initial power-on")
+                                   : result;
 }
 
-static int epd_write_frame(epd_context_t *context,
-                           const uint8_t *wire_data,
+static int epd_write_frame(epd_context_t *context, const uint8_t *wire_data,
                            size_t wire_size)
 {
     int result = epd_command(context, 0x10);
@@ -320,8 +324,7 @@ static int epd_write_frame(epd_context_t *context,
             .length = length * 8u,
             .tx_buffer = context->dma_buffer,
         };
-        if (spi_device_polling_transmit(context->spi, &transaction) !=
-            ESP_OK) {
+        if (spi_device_polling_transmit(context->spi, &transaction) != ESP_OK) {
             result = PHOTOFRAME_ERR_IO;
         }
         offset += length;
@@ -337,27 +340,24 @@ static int epd_refresh_and_power_off(epd_context_t *context)
     static const uint8_t zero[] = {0x00};
 
     int result = epd_command(context, 0x04);
+    if (result == PHOTOFRAME_OK)
+        result = epd_wait_ready("second power-on");
     if (result == PHOTOFRAME_OK) {
-        result = epd_wait_ready();
-    }
-    if (result == PHOTOFRAME_OK) {
-        result = epd_setting(context,
-                             0x06,
-                             second_setting,
-                             sizeof(second_setting));
+        result =
+            epd_setting(context, 0x06, second_setting, sizeof(second_setting));
     }
     if (result == PHOTOFRAME_OK) {
         result = epd_setting(context, 0x12, zero, sizeof(zero));
     }
     if (result == PHOTOFRAME_OK) {
-        result = epd_wait_ready();
+        result = epd_wait_ready("refresh");
     }
     if (result == PHOTOFRAME_OK) {
         result = epd_setting(context, 0x02, zero, sizeof(zero));
     }
     if (result == PHOTOFRAME_OK) {
         /* Success is impossible until this final POWER_OFF wait completes. */
-        result = epd_wait_ready();
+        result = epd_wait_ready("power-off");
     }
     return result;
 }
@@ -369,15 +369,22 @@ int photoframe_e6_render(const uint8_t *wire_data, size_t wire_size)
     }
 
     epd_context_t context = {0};
+    fprintf(stderr, "photoframe: opening display\n");
     int result = epd_open(&context);
+    fprintf(stderr, "photoframe: open result=%d\n", result);
     if (result == PHOTOFRAME_OK) {
+        fprintf(stderr, "photoframe: initializing E6\n");
         result = epd_initialize(&context);
+        fprintf(stderr, "photoframe: initialize result=%d\n", result);
     }
     if (result == PHOTOFRAME_OK) {
         result = epd_write_frame(&context, wire_data, wire_size);
+        fprintf(stderr, "photoframe: frame transfer result=%d\n", result);
     }
     if (result == PHOTOFRAME_OK) {
         result = epd_refresh_and_power_off(&context);
+        fprintf(stderr, "photoframe: refresh and final power-off result=%d\n",
+                result);
     }
 
     int close_result = epd_close(&context);

@@ -17,6 +17,8 @@ idf.py -B build-so -DIDF_TARGET=esp32s3 \
 
 产物为 `build-app/photoframe.app.elf` 与 `build-so/photoframe.so`。`main/idf_component.yml` 从 Espressif Component Registry 解析 `espressif/elf_loader: ^1.3.3` 与 `espressif/libpng: ^1.6.58~1`；`dependencies.lock` 固定本次解析结果，其中 elf_loader 为 1.3.3。依赖不 fork、不 vendor。
 
+业务 app ELF 通过宿主的独立 A/B 槽更新，ABI 兼容时无需重建或刷写主程序。不要刷写组件构建目录内的普通 `.bin`。打包、上传、试运行及回退步骤见 [宿主双槽说明](https://github.com/M1nt-Ch0c0/photopainter-host/blob/main/docs-module-slots.md)。
+
 本机解码与打包测试：
 
 ```sh
@@ -25,7 +27,7 @@ cmake --build tests/build
 ctest --test-dir tests/build --output-on-failure
 ```
 
-显示引脚和 E6 初始化、刷新、关断时序取自 Waveshare [`ESP32-S3-PhotoPainter` commit `a5e8f757`](https://github.com/waveshareteam/ESP32-S3-PhotoPainter/tree/a5e8f757ba0cafbb5586f07d3e83bda3184c0845/01_Example/xiaozhi-esp32)。SCLK/MOSI/DC/CS/RST/BUSY 固定为 GPIO 10/11/8/9/12/13；AXP2101 通过 GPIO 48/47 上的 I2C0 验证芯片 ID，配置并回读 ALDO3 3.3 V 后才允许访问 EPD GPIO/SPI。上游 MIT notice 保存在 `LICENSES/Waveshare-PhotoPainter-MIT.txt`，本仓库原创代码使用 `LICENSE` 中的 MIT 许可。
+显示引脚和 E6 初始化、刷新、关断时序取自 Waveshare [`ESP32-S3-PhotoPainter` commit `a5e8f757`](https://github.com/waveshareteam/ESP32-S3-PhotoPainter/tree/a5e8f757ba0cafbb5586f07d3e83bda3184c0845/01_Example/xiaozhi-esp32)。SCLK/MOSI/DC/CS/RST/BUSY 固定为 GPIO 10/11/8/9/12/13；AXP2101 通过 GPIO 48/47 上的 I2C0 验证芯片 ID，配置并回读 ALDO4 3.3 V 后才允许访问 EPD GPIO/SPI。上游 MIT notice 保存在 `LICENSES/Waveshare-PhotoPainter-MIT.txt`，本仓库原创代码使用 `LICENSE` 中的 MIT 许可。
 
 ## 推图
 
@@ -61,3 +63,5 @@ void photoframe_host_report_result(int result);
 ## 鉴权
 
 组件不保存密钥，也不实现网络鉴权。Bearer 推图码只由宿主固件校验；宿主验证鉴权、请求大小和 PNG 签名字节后，才把内存缓冲区交给本组件，完整 PNG 验证由组件在触碰面板前完成。不得把 Wi-Fi 密码、推图码、NVS 镜像或其他密钥提交到此仓库。
+
+电源映射依据：[官方原理图](https://files.waveshare.com/wiki/ESP32-S3-PhotoPainter/ESP32-S3-PhotoPainter-Schematic.pdf)中 AXP2101 的 pin 15 / ALDO4 连接 `EPD_VCC`，pin 16 / ALDO3 连接 `Audio_VCC`。屏幕电压寄存器为 `0x95`，使能为 `0x90` 的 bit 3；读改写保留其他电源位。

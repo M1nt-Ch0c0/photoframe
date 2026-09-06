@@ -218,9 +218,12 @@ static void expect_no_display(const memory_png_t *png, int expected)
 
 int main(void)
 {
-    assert(photoframe_axp2101_aldo3_voltage_value(0xa3) == 0xbc);
-    assert(photoframe_axp2101_aldo3_voltage_value(0x7f) == 0x7c);
-    assert(photoframe_axp2101_aldo3_enable_value(0xa1) == 0xa5);
+    assert(photoframe_axp2101_aldo4_voltage_value(0xa3) == 0xbc);
+    assert(photoframe_axp2101_aldo4_voltage_value(0x7f) == 0x7c);
+    /* Enabling EPD must preserve the separate audio rail (bit 2). */
+    assert(photoframe_axp2101_aldo4_enable_value(0xa1) == 0xa9);
+    assert(photoframe_axp2101_aldo4_enable_value(0x04) == 0x0c);
+    assert(photoframe_axp2101_aldo4_enable_value(0xff) == 0xff);
 
     reset_display_stub(PHOTOFRAME_OK);
     assert(photoframe_render_png(NULL, 1) == PHOTOFRAME_ERR_ARGUMENT);
