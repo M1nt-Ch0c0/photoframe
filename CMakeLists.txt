@@ -19,6 +19,13 @@ endif()
 
 set(PHOTOFRAME_ARTIFACT "app" CACHE STRING "ELF-loader artifact to build: app or so")
 set_property(CACHE PHOTOFRAME_ARTIFACT PROPERTY STRINGS app so)
+set(PHOTOFRAME_ABI "2" CACHE STRING "Application ABI: 1 (legacy) or 2")
+if(NOT PHOTOFRAME_ABI MATCHES "^[12]$")
+    message(FATAL_ERROR "PHOTOFRAME_ABI must be 1 or 2")
+endif()
+if(PHOTOFRAME_ARTIFACT STREQUAL "so")
+    set(PHOTOFRAME_ABI "1")
+endif()
 
 if(NOT PHOTOFRAME_ARTIFACT STREQUAL "app" AND
    NOT PHOTOFRAME_ARTIFACT STREQUAL "so")
@@ -166,5 +173,6 @@ if(PHOTOFRAME_ARTIFACT STREQUAL "so")
     # dependency explicit as well.
     add_dependencies(so ${PHOTOFRAME_SO_ARCHIVE_TARGETS})
 else()
+    include("${CMAKE_CURRENT_LIST_DIR}/components/app_sdk/app_elf.cmake")
     project_elf(photoframe)
 endif()

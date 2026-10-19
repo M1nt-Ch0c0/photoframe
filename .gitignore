@@ -3,3 +3,8 @@
 /sdkconfig
 /sdkconfig.old
 /tests/build*/
+/examples/*/build*/
+/examples/*/managed_components/
+/examples/*/sdkconfig*
+__pycache__/
+*.pyc

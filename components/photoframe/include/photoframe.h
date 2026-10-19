@@ -34,6 +34,10 @@ typedef enum {
 __attribute__((visibility("default")))
 int photoframe_render_png(const uint8_t *png_data, size_t png_size);
 
+/* Application-owned logical top-left frame, 800x480 bytes, indices 0..5.
+ * Caller frees successful output with free(). No board I/O is performed. */
+int photoframe_decode_indexed(const uint8_t *data,size_t size,uint8_t **out);
+
 #ifdef __cplusplus
 }
 #endif

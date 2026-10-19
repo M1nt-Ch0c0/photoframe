@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include <png.h>
+#include <zlib.h>
 
 #include "photoframe.h"
 #include "photoframe_internal.h"
@@ -214,6 +215,9 @@ static void expect_no_display(const memory_png_t *png, int expected)
     reset_display_stub(PHOTOFRAME_OK);
     assert(photoframe_render_png(png->data, png->size) == expected);
     assert(display_calls == 0);
+    uint8_t *logical=NULL;
+    assert(photoframe_decode_indexed(png->data,png->size,&logical)==expected);
+    assert(logical==NULL);
 }
 
 int main(void)
@@ -243,6 +247,17 @@ int main(void)
     assert(photoframe_render_png(valid.data, valid.size) == PHOTOFRAME_OK);
     assert(display_calls == 1);
 
+    uint8_t *logical=NULL,*packed=NULL;
+    assert(photoframe_decode_indexed(valid.data,valid.size,&logical)==PHOTOFRAME_OK);
+    assert(photoframe_decode_png(valid.data,valid.size,&packed)==PHOTOFRAME_OK);
+    const uint8_t codes[]={0,1,2,3,5,6};
+    for(size_t i=0;i<800u*480u;i+=2) {
+        assert(logical[i]<6&&logical[i+1]<6);
+        assert(packed[PHOTOFRAME_FRAME_BYTES-1-i/2]==(codes[logical[i+1]]<<4|codes[logical[i]]));
+    }
+    assert(logical[0]==3&&logical[1]==4);
+    assert(logical[800u*480u-2]==2&&logical[800u*480u-1]==5);
+    free(logical);free(packed);
     reset_display_stub(PHOTOFRAME_ERR_BUSY_TIMEOUT);
     assert(photoframe_render_png(valid.data, valid.size) ==
            PHOTOFRAME_ERR_BUSY_TIMEOUT);
@@ -290,6 +305,24 @@ int main(void)
     memcpy(trailing.data, valid.data, valid.size);
     trailing.data[valid.size] = 0;
     expect_no_display(&trailing, PHOTOFRAME_ERR_PNG);
+
+    /* Protocol maximum remains valid with a large ignored ancillary chunk.
+     * Decode first, so this verifies the real decoder without panel I/O. */
+    size_t maximum_size=5u*1024u*1024u;
+    uint8_t *maximum=calloc(1,maximum_size);
+    assert(maximum&&valid.size>=12);
+    size_t prefix=valid.size-12, padding=maximum_size-valid.size-12;
+    memcpy(maximum,valid.data,prefix);
+    uint32_t chunk_length=(uint32_t)padding;
+    for(unsigned i=0;i<4;i++)maximum[prefix+i]=(uint8_t)(chunk_length>>(24-8*i));
+    memcpy(maximum+prefix+4,"vpAg",4);
+    uint32_t crc=(uint32_t)crc32(0,maximum+prefix+4,(uInt)padding+4);
+    for(unsigned i=0;i<4;i++)maximum[prefix+8+padding+i]=(uint8_t)(crc>>(24-8*i));
+    memcpy(maximum+maximum_size-12,valid.data+valid.size-12,12);
+    logical=NULL;
+    assert(photoframe_decode_indexed(maximum,maximum_size,&logical)==PHOTOFRAME_OK);
+    assert(logical[0]==3&&logical[1]==4);
+    free(logical);free(maximum);
 
     free(valid.data);
     free(palette.data);

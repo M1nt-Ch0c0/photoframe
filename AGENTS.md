@@ -4,7 +4,7 @@ Read this file before changing the loadable display component. For blank-machine
 
 ## Repository role
 
-This repository owns strict PNG decoding, six-color validation, 180-degree pixel packing, AXP2101 setup, GPIO/SPI access, official Spectra 6 E6 timing, and the `.app.elf` and `.so` deliverables. It must not own Wi-Fi, HTTP, authentication, scheduling, secrets, or a complete device firmware.
+This repository owns strict PNG decoding, six-color validation, app-owned first screens/restoration and independent `.app.elf` deliverables. Default ABI 2 uses the host board service for rotation, packing and E6/power I/O; legacy ABI 1 and `.so` retain the old driver. It must not own Wi-Fi, HTTP, authentication, scheduling, secrets, or a complete device firmware.
 
 The host loads the app ELF from independent A/B data slots. Package and stage business updates with the sibling host tools/module.py; no host rebuild is required for ABI-compatible changes. Read ../photopainter-host/docs-module-slots.md. The `.so` remains an additional artifact, not the deployed profile.
 
@@ -36,7 +36,9 @@ idf.py -B build-so -DIDF_TARGET=esp32s3 \
   -DPHOTOFRAME_ARTIFACT=so build
 ```
 
-After driver changes, inspect both artifacts and test module staging/activation/rollback. Rebuild `../photopainter-host` only when changing its fixed ABI or framework. Do not claim real display success without an authenticated request returning 200 and human confirmation of content, orientation, and colors.
+For ABI 2 use the mirrored `components/app_sdk` header and the host `docs-runtime-v2.md` contract. Never import background tasks or board APIs into ABI 2 apps. Keep the SDK copy byte-identical to host.
+
+After legacy driver changes, inspect both artifacts and test module staging/activation/rollback. Rebuild `../photopainter-host` only when changing its fixed ABI or framework. Do not claim real display success without an authenticated request returning 200 and human confirmation of content, orientation, and colors.
 
 ## Secrets and hardware
 
