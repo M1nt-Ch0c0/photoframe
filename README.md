@@ -8,6 +8,8 @@
 
 ## 构建与安装
 
+SDK 现在包含兼容的 ABI 2.1 BLE 扩展；普通相框和旧应用仍声明 2.0。需要应用自定义蓝牙服务时使用 `APP_MANIFEST_BLE`，参考 [BLE 回显示例](examples/ble-echo/README.md)。宿主保存 GATT 描述和数据副本，通过事件交付写入，应用切出时清理服务；应用不直接控制蓝牙协议栈、发现广播或安装通道。
+
 本仓库为 7.3 英寸、800×480、六色 Spectra 6 PhotoPainter 提供独立可加载组件，不是整机固件。使用 ESP-IDF commit `5e6f53cdb31fe5708eae3f55af9737be2822db22`（约 v6.0.3），分别构建应用 ELF 与共享对象：
 
 ```sh

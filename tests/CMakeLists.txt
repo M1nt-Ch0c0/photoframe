@@ -23,3 +23,12 @@ target_compile_options(photoframe_native_tests PRIVATE -Wall -Wextra)
 
 enable_testing()
 add_test(NAME photoframe_native_tests COMMAND photoframe_native_tests)
+
+add_library(ble_echo_entry OBJECT ../examples/ble-echo/main/entry.c)
+target_include_directories(ble_echo_entry PRIVATE ../components/app_sdk/include)
+target_compile_definitions(ble_echo_entry PRIVATE main=app_entry)
+target_compile_options(ble_echo_entry PRIVATE -Wall -Wextra -Werror)
+add_executable(ble_echo_native_tests ../examples/ble-echo/test_entry.c $<TARGET_OBJECTS:ble_echo_entry>)
+target_include_directories(ble_echo_native_tests PRIVATE ../components/app_sdk/include)
+target_compile_options(ble_echo_native_tests PRIVATE -Wall -Wextra -Werror)
+add_test(NAME ble_echo_native_tests COMMAND ble_echo_native_tests)
