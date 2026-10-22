@@ -10,9 +10,10 @@
 
 #if PHOTOFRAME_APP_ENTRY && PHOTOFRAME_ABI_2
 #include "photopainter_app.h"
+#include "ble_image.h"
 #include <stdlib.h>
 #include <string.h>
-APP_MANIFEST("photoframe","Photo frame",APP_INPUT_PNG,APP_REQUIRES_DISPLAY);
+APP_MANIFEST_BLE("photoframe","Photo frame",APP_INPUT_PNG,APP_REQUIRES_DISPLAY);
 #define FRAME_CACHE_VERSION 1u
 /* The waiting page and restoration policy belong to the app, never the host. */
 static void waiting(uint8_t *frame) {
@@ -42,6 +43,8 @@ int main(int argc,char **argv) {
     const app_context_v2_t *c=app_host_context_v2();if(!c)return APP_ERR_RUNTIME;
     int r=APP_OK;uint8_t *frame=NULL;
     if(c->event==APP_EVENT_START) {
+        r=ble_image_start();
+        if(r!=APP_OK)goto complete;
         uint32_t bytes=0;const uint8_t *cached=app_host_cache_get_v2(FRAME_CACHE_VERSION,&bytes);
         if(cached&&bytes==APP_FRAME_BYTES)r=app_host_display_v2(cached,bytes);
         else {
@@ -49,8 +52,19 @@ int main(int argc,char **argv) {
             if(!frame)r=APP_ERR_MEMORY;
             else {waiting(frame);r=app_host_display_v2(frame,APP_FRAME_BYTES);}
         }
+        if(r!=APP_OK)ble_image_stop();
+    } else if(c->event==APP_EVENT_STOP) {
+        ble_image_stop();
+    } else if(c->event==APP_EVENT_TIMER) {
+        r=ble_image_tick();
+    } else if(c->event==APP_EVENT_BLE) {
+        if(!c->data || c->data_size!=sizeof(app_ble_event_v2_t))r=APP_ERR_ARGUMENT;
+        else r=ble_image_event((const app_ble_event_v2_t *)c->data);
     } else if(c->event==APP_EVENT_INPUT) {
-        if(c->input_type!=APP_INPUT_PNG)r=APP_ERR_UNSUPPORTED;
+        /* HTTP PNG cannot interrupt or interleave an app-owned BLE receive.
+         * Keep the legacy input error (422), without unloading the app. */
+        if(ble_image_receiving())r=APP_ERR_INPUT;
+        else if(c->input_type!=APP_INPUT_PNG)r=APP_ERR_UNSUPPORTED;
         else r=photoframe_decode_indexed(c->data,c->data_size,&frame);
         if(r==APP_OK) {
             r=app_host_display_v2(frame,APP_FRAME_BYTES);
@@ -58,6 +72,7 @@ int main(int argc,char **argv) {
             if(r==APP_OK)(void)app_host_cache_put_v2(FRAME_CACHE_VERSION,frame,APP_FRAME_BYTES);
         }
     }
+complete:
     free(frame);
     app_complete(c,r,c->event==APP_EVENT_START&&r==APP_OK?APP_READY:0);
     return r;

@@ -1,7 +1,11 @@
 # SPDX-FileCopyrightText: 2026 M1nt-Ch0c0
 # SPDX-License-Identifier: MIT
 
-idf_component_register(SRCS "entry.c"
+set(entry_sources "entry.c")
+if(PHOTOFRAME_ARTIFACT STREQUAL "app" AND PHOTOFRAME_ABI STREQUAL "2")
+    list(APPEND entry_sources "ble_image.c" "image_sha256.c")
+endif()
+idf_component_register(SRCS ${entry_sources}
                        REQUIRES photoframe app_sdk)
 
 if(PHOTOFRAME_ARTIFACT STREQUAL "app")
