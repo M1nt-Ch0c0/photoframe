@@ -115,6 +115,8 @@ int main(void) {
     send(IMAGE_COMMIT,NULL,0);assert(displays==3);
     id[0]++;begin(n);assert(live()==1);assert(event(APP_EVENT_STOP,NULL,0)==0&&!registered&&live()==0);
     assert(event(APP_EVENT_START,NULL,0)==0);send(IMAGE_QUERY,NULL,0);assert(status[4]==IMAGE_MISSING);
+    int before_http=displays;context.input_type=APP_INPUT_PNG;
+    assert(event(APP_EVENT_INPUT,png,n)==APP_OK && displays==before_http+1 && registered && live()==0);
     begin(n);assert(live()==1);
     app_ble_event_v2_t error={.type=APP_BLE_ERROR};
     assert(event(APP_EVENT_BLE,&error,sizeof(error))==APP_ERR_RUNTIME && !registered && live()==0);
