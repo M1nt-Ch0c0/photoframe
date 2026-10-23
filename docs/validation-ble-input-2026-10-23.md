@@ -65,8 +65,9 @@
 
 ## 待核验的实机项目
 
-有效图的 APP 完成回执与丢回复恢复、切出服务/旧代次失效与切回、应用回滚、真实 GPIO 4
-切换及人工目测仍须以本轮最终记录为准。常驻服务在完成这些验收之前保持禁用。
+应用双向回滚已在当前 USB 连接下通过。切出服务/旧代次失效与切回有部分通过证据，
+但生命周期整项因连接失败及一次重启尚未通过，详见最后一节；真实 GPIO 4 和人工目测仍未验证。
+有效图的 APP 完成回执与丢回复恢复已通过，见下一节。常驻服务在完成验收之前保持禁用。
 最大 5 MiB 的证据目前仅为预约和释放，不代表完整传输 5 MiB 或长期耐久。
 
 ## APP 实体刷新与丢回复
@@ -88,9 +89,75 @@
 uptime 63829 ms、reset reason 1，cache_bytes=0，证明在已通过的显示测试之后发生了 POWERON 重启。
 这不推翻已取得的那次完成回执，也不能据此宣称长时间供电稳定。
 doctor 此前枚举到了设备 USB 串口；已请用户核实独立 USB 供电和 Mac 数据线状态。
-不打开串口、不改变宿主，等待供电状态核实后再做剩余实体操作和最终目测。
+当时暂缓了剩余实体操作。独立供电是排查对照条件，并非 BLE 的技术要求；
+不能仅凭 USB 枚举和 POWERON 复位码认定 Mac USB 是重启原因。
 
 已安装的新主路径电脑端 SHA-256：
 `aca660cbca11415d53208416cbd73eea54a6c298b4b689dc7b326099f65f119e`。
 原电脑端已在仓库外保留回退副本，SHA-256 与 HANDOFF 的 `8c9251a9...` 一致。
 运行配置和应用身份未修改，常驻服务继续禁用；没有读取日常服务日志或输出私有配置。
+
+## 当前 USB 连接下继续验收
+
+用户明确要求「再试一次」，继续当前 USB 供电/数据连接条件下的 BLE 操作。
+仍不开串口、不刷宿主；按每次签名状态核对版本、运行代次和启动时间。
+
+重试前签名状态与上一次不同：运行 ABI 1 v15，active A、previous/pending 均为 -1，
+槽版本 `[15,17]`，generation 1、last_switch_source=boot、uptime 483489 ms、reset reason 1。
+这符合 `app_boot_fallback()` / `module_slots_recover()` 将 previous 恢复为 active 并清除回退标记的状态；
+没有串口记录，不能确定是哪次 START 失败或中断触发。设备鉴权发现仍为 IPv4 `0.0.0.0`。
+
+保留活动 v15，将同一 ELF（SHA 未变）重新打包为 v18，79396 字节，包 SHA-256
+`16a569c6e85efeee2aaf8d4b6a8c673c62e02fbc6f6753f7e588734b1df521ef`。
+BLE 上传得到签名暂存成功响应；随后单次显式激活成功，v18、active B/previous A、
+ready/runtime_ready/confirmed=true，generation 2、service revision 5，uptime 653739 ms。
+
+显式回滚 v18→v15 成功：active A/previous B、generation 3、uptime 817209 ms。
+ABI 1 v15 的 ready=true 表示已加载；runtime_ready/confirmed=false 符合尚未 INPUT 的状态，
+不能把它误判为 ABI 2 START 失败。再执行一次 rollback 回 v18；该次命令遇到 GATT 读取超时，
+没有重发，重新鉴权查询确认 active B/previous A、ready/runtime_ready/confirmed=true，
+generation 4、service revision 11、uptime 876179 ms。槽版本保持 `[15,18]`，
+reset reason 一直为 1，以上安装、激活和双向回滚期间 uptime 连续，无重启证据。
+
+随后将现有 ABI 2 色条 ELF 打包为 `color-test v4`（5732 字节），暂存备用 B 槽并显式激活。
+签名状态确认 v4、ABI 2、active B/previous A、ready/runtime_ready/confirmed=true，
+generation 5、uptime 936729 ms，色条与相框均 button_eligible=true；旧色条 v1 保留。
+单次 BLE SWITCH 返回相框时读取超时，首次状态查询也超时；未重复 SWITCH，
+后续签名状态确认 v18 正常运行、generation 6、revision 17、uptime 1025952 ms。
+reset reason 仍为 1。这说明本轮超时并非重启证据，服务变化后的重连仍有短暂不稳定。
+
+### 生命周期重试：部分证据通过，整项尚未通过
+
+首次 `TestHardwareAppImageLifecycle` 在 54.35 秒失败于恢复后的鉴权挑战读取。
+在此之前，5 MiB 接收期间切出成功，PSRAM 从接收前 8281640 恢复到色条运行时
+8349372，旧 photoframe 服务不可用、旧代次 READ/WRITE 均回宿主错误 8。
+返回相框的 SWITCH 回复丢失后没有重发；独立查询确认 v18 已恢复，generation 8、
+revision 23、uptime 1127249 ms，无重启，PSRAM 8283216。
+
+电脑端测试提交 `93bbe07` 仅给生命周期测试增加最多 3 次连接建立尝试；一旦进入
+已鉴权回调，立即返回其结果，绝不重放其中的应用操作。硬件测试二进制重编通过，
+`go test -tags photopainter_hardware ./internal/ble` 通过（硬件项默认不启用）。
+正常客户端程序未改变。
+
+再次完整运行在 27.51 秒失败，这次是真实重启：切出前 uptime 1183419 ms，
+SWITCH 回复丢失后观察到 uptime 14147 ms、reset reason 1，未运行预期色条应用。
+未重发切换。独立签名查询确认启动后仍为 photoframe v18、generation 1、source=boot、
+ready/runtime_ready/confirmed=true、uptime 50956 ms，色条 v4 及两应用旧槽仍保留。
+因此不能把生命周期整项标成 PASS，也不能仅凭 POWERON 复位码推断 USB 是原因。
+已询问用户是否有拔插/复位操作；继续当前连接进行受控的正确主题恢复，不要求更换供电。
+
+### v18 正确主题恢复与完成回执
+
+恢复主题的首次连接在 DiscoverServices 阶段超时，尚未进入已鉴权测试回调、上传或 COMMIT。
+再次独立连接后，`TestHardwareAppImageDisplay` PASS，250.63 秒。
+仍用相同的 59124 字节 `mint-skin` PNG：222.5 秒传完，故意丢弃 COMMIT 回复后，
+247.5 秒取得原请求的匹配完成回执，严格一次 COMMIT、一次 QUERY，证明物理刷新及 POWER_OFF 完成。
+本次显示前/后 uptime 为 62649/304879 ms、reset reason 1，窗口内未重启；
+内部空闲 RAM 163579/163571，PSRAM 8281656/7896612，差值包含成功后的帧缓存。
+此窗口成功不消除前述切换时重启，不能据此宣布完整生命周期或长期稳定性验收通过。
+
+测试后已原子恢复正常客户端程序（SHA `aca660cb...`），没有留下硬件测试二进制作为后台程序。
+常驻服务保持未加载，客户端进程为 0；配置及用户已有文档草稿未改。
+本次新路径画面的方向/颜色/内容已请求人工确认，尚未收到回复。
+最终独立签名查询仍为 v18、active B/previous A、ready/runtime_ready/confirmed=true，
+uptime 362719 ms、cache_bytes 384000；较完成后的 304879 ms 连续增长，未见新增重启。
