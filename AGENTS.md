@@ -38,7 +38,7 @@ idf.py -B build-so -DIDF_TARGET=esp32s3 \
 
 For ABI 2 use the mirrored `components/app_sdk` header and the host `docs-runtime-v2.md` contract. Never import background tasks or board APIs into ABI 2 apps. Keep the SDK copy byte-identical to host.
 
-After legacy driver changes, inspect both artifacts and test module staging/activation/rollback. Rebuild `../photopainter-host` only when changing its fixed ABI or framework. Do not claim real display success without an authenticated request returning 200 and human confirmation of content, orientation, and colors.
+After legacy driver changes, inspect both artifacts and test module staging/activation/rollback. Rebuild `../photopainter-host` only when changing its fixed ABI or framework. Do not claim real display success without HTTP 200 or an authenticated BLE image-completion receipt, plus human confirmation of content, orientation, and colors. BLE PNG input reuses the same application ABI; custom GATT is not required for image reception.
 
 ## Secrets and hardware
 

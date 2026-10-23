@@ -39,6 +39,8 @@ python3 -m unittest discover -s examples/color-test -p 'test_*.py'
 
 ## 推图
 
+宿主支持通过 HTTP 或 BLE 接收 PNG，两种传输都由同一个 App Manager 串行交给当前应用。BLE 推图不要求相框连接 Wi-Fi，也不要求现有 ABI 1/2 PNG 应用重新构建或使用 ABI 2.1；发现、鉴权、分块和完成凭据由宿主处理。电脑端命令为 `ai-quota-frame ble push --file frame.png`，常驻服务设置 `PHOTOFRAME_PUSH_TRANSPORT=ble`，详见[电脑端 BLE 指南](https://github.com/M1nt-Ch0c0/ai-quota-frame/blob/codex/ble-image-push/docs/ble.md)。应用必须已被选中，推图不会抢占其他应用。
+
 共享对象公开 ABI：
 
 ```c
@@ -70,7 +72,7 @@ void photoframe_host_report_result(int result);
 
 ## 鉴权
 
-组件不保存密钥，也不实现网络鉴权。Bearer 推图码只由宿主固件校验；宿主验证鉴权、请求大小和 PNG 签名字节后，才把内存缓冲区交给本组件，完整 PNG 验证由组件在触碰面板前完成。不得把 Wi-Fi 密码、推图码、NVS 镜像或其他密钥提交到此仓库。
+组件不保存密钥，也不实现网络鉴权。HTTP Bearer 和 BLE HMAC 只由宿主固件校验；宿主检查鉴权和请求大小后，才把内存缓冲区交给本组件，完整 PNG 验证由组件在触碰面板前完成。HTTP 200 或 BLE 鉴权完成凭据只在实体刷新和最终 POWER_OFF 等待结束后返回，仍需人工确认显示效果。不得把 Wi-Fi 密码、推图码、NVS 镜像或其他密钥提交到此仓库。
 
 电源映射依据：[官方原理图](https://files.waveshare.com/wiki/ESP32-S3-PhotoPainter/ESP32-S3-PhotoPainter-Schematic.pdf)中 AXP2101 的 pin 15 / ALDO4 连接 `EPD_VCC`，pin 16 / ALDO3 连接 `Audio_VCC`。屏幕电压寄存器为 `0x95`，使能为 `0x90` 的 bit 3；读改写保留其他电源位。
 
