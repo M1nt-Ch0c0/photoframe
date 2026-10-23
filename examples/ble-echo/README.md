@@ -42,4 +42,4 @@ The read must contain `hello`; after switching out, the echo service disappears
 and the old service generation is rejected. The permanent discovery and package
 service remains available. Direct writes on the custom characteristic also use
 the host's signed BLE frame format, not naked text. See the host
-[`docs/ble-protocol.md`](https://github.com/M1nt-Ch0c0/photopainter-host/blob/codex/ble-discovery-app-ota/docs/ble-protocol.md).
+[`docs/ble-protocol.md`](https://github.com/M1nt-Ch0c0/photopainter-host/blob/main/docs/ble-protocol.md).

@@ -1,14 +1,20 @@
 # photoframe
 
+**源码状态：main 已包含 ABI 2.1 相框 BLE 收图。** 实现基线为 `3b09a00`，实机与回滚记录截至 `e910153`；源码发布不代表完整生命周期和长期稳定性验收通过，见 [验收记录](docs/validation-ble-input-2026-10-23.md)。
+
 > **AI / 开发者入口：**先阅读 [`AGENTS.md`](AGENTS.md)。空白电脑部署、三仓联调和真机诊断使用 [`develop-photopainter-stack`](https://github.com/M1nt-Ch0c0/photopainter-host/blob/main/.agents/skills/develop-photopainter-stack/SKILL.md)。
 
 四个仓库的职责、架构图、耦合边界与修改影响，见 [PhotoPainter 架构总览](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/ARCHITECTURE.md)。
 
-默认 `.app.elf` 已使用 ABI 2：启动时恢复缓存或显示 `WAITING FOR IMAGE`，收到 PNG 后更新屏幕；宿主负责六色逻辑帧的板级显示。必须先部署支持 ABI 2 的新宿主。完整规则见 [运行层指南](https://github.com/M1nt-Ch0c0/photopainter-host/blob/codex/multi-wifi-apps/docs-runtime-v2.md)。
+**应用开发从 [开发者 Wiki](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/wiki/Home.md) 开始。** 本仓库维护应用入口、业务输入、图片验证和示例；宿主框架只提供运行、鉴权、更新和通用服务。
+
+相框 APP 通过 ABI 2.1 实现 BLE 收图状态机、APP 内 SHA-256、断线/超时清理与显示完成回执。电脑端使用签名应用特征读写，不使用旧宿主 PNG opcode 作为主路径。协议见 [BLE 收图](docs/ble-image-input.md)，已测范围和剩余问题见 [实机记录](docs/validation-ble-input-2026-10-23.md)。
+
+默认 `.app.elf` 已使用 ABI 2：启动时恢复缓存或显示 `WAITING FOR IMAGE`，收到 PNG 后更新屏幕；宿主负责六色逻辑帧的板级显示。必须先部署支持 ABI 2 的新宿主。完整规则见 [运行层指南](https://github.com/M1nt-Ch0c0/photopainter-host/blob/main/docs-runtime-v2.md)。
 
 ## 构建与安装
 
-SDK 现在包含兼容的 ABI 2.1 BLE 扩展；普通相框和旧应用仍声明 2.0。需要应用自定义蓝牙服务时使用 `APP_MANIFEST_BLE`，参考 [BLE 回显示例](examples/ble-echo/README.md)。宿主保存 GATT 描述和数据副本，通过事件交付写入，应用切出时清理服务；应用不直接控制蓝牙协议栈、发现广播或安装通道。
+SDK 包含兼容的 ABI 2.1 BLE 扩展；默认相框声明 2.1，旧 2.0 应用继续兼容。需要应用自定义蓝牙服务时使用 `APP_MANIFEST_BLE`，参考 [BLE 回显示例](examples/ble-echo/README.md)。宿主保存 GATT 描述和数据副本，通过事件交付写入，应用切出时清理服务；应用不直接控制蓝牙协议栈、发现广播或安装通道。
 
 本仓库为 7.3 英寸、800×480、六色 Spectra 6 PhotoPainter 提供独立可加载组件，不是整机固件。使用 ESP-IDF commit `5e6f53cdb31fe5708eae3f55af9737be2822db22`（约 v6.0.3），分别构建应用 ELF 与共享对象：
 
@@ -39,7 +45,7 @@ python3 -m unittest discover -s examples/color-test -p 'test_*.py'
 
 ## 推图
 
-宿主支持通过 HTTP 或 BLE 接收 PNG，两种传输都由同一个 App Manager 串行交给当前应用。BLE 推图不要求相框连接 Wi-Fi，也不要求现有 ABI 1/2 PNG 应用重新构建或使用 ABI 2.1；发现、鉴权、分块和完成凭据由宿主处理。电脑端命令为 `ai-quota-frame ble push --file frame.png`，常驻服务设置 `PHOTOFRAME_PUSH_TRANSPORT=ble`，详见[电脑端 BLE 指南](https://github.com/M1nt-Ch0c0/ai-quota-frame/blob/codex/ble-image-push/docs/ble.md)。应用必须已被选中，推图不会抢占其他应用。
+默认 BLE 主路径由本 APP 的 ABI 2.1 服务接收，电脑端命令为 `ai-quota-frame ble push --file frame.png`，常驻服务设置 `PHOTOFRAME_PUSH_TRANSPORT=ble`。服务 UUID、分块与回执契约见 [应用协议](docs/ble-image-input.md)。宿主 HTTP 和旧专用 BLE PNG 通道保留兼容。所有路径都不能抢占当前应用；发现、鉴权和 OTA 始终由宿主提供。命令见 [电脑端指南](https://github.com/M1nt-Ch0c0/ai-quota-frame/blob/main/docs/ble.md)。
 
 共享对象公开 ABI：
 

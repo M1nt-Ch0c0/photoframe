@@ -1,12 +1,16 @@
 # Photoframe component agent guide
 
+**Source and documentation baseline:** main includes the resident BLE/ABI 2.1 framework, photoframe-owned image reception and its desktop client. See the [version/status matrix](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/wiki/Status-and-Evidence.md) for source commits and remaining hardware acceptance limits.
+
 Read this file before changing the loadable display component. For blank-machine setup, cross-repository integration, deployment, or hardware diagnosis, also read the complete project Skill in the sibling host checkout: `../photopainter-host/.agents/skills/develop-photopainter-stack/SKILL.md`.
 
 ## Repository role
 
 This repository owns strict PNG decoding, six-color validation, app-owned first screens/restoration and independent `.app.elf` deliverables. Default ABI 2 uses the host board service for rotation, packing and E6/power I/O; legacy ABI 1 and `.so` retain the old driver. It must not own Wi-Fi, HTTP, authentication, scheduling, secrets, or a complete device firmware.
 
-The host loads the app ELF from independent A/B data slots. Package and stage business updates with the sibling host tools/module.py; no host rebuild is required for ABI-compatible changes. Read ../photopainter-host/docs-module-slots.md. The `.so` remains an additional artifact, not the deployed profile.
+The host loads the app ELF from independent A/B data slots. Package and stage business updates with the sibling host tools/module.py; no host rebuild is required for ABI-compatible changes. Read ../photopainter-host/docs-module-slots.md. The `.so` remains an additional artifact, not the deployed profile. The [developer Wiki](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/wiki/Home.md) is the framework entry point; application-specific input protocols and decoder behavior belong here.
+
+ABI 2.1 implements BLE image reception, integrity checks, transfer state and completion receipts in this application. Use the existing managed BLE/auth/display services and manager; do not extend the dedicated host PNG protocol. See docs/ble-image-input.md and docs/validation-ble-input-2026-10-23.md for the implemented protocol and hardware limits.
 
 ## Non-negotiable constraints
 
@@ -18,7 +22,7 @@ The host loads the app ELF from independent A/B data slots. Package and stage bu
 - Fully decode and validate before AXP2101, GPIO, SPI, or panel I/O.
 - Return success only after final POWER_OFF and BUSY completion.
 - Preserve the published C ABI, host bridge symbols, and numeric result codes unless the host is updated atomically.
-- Do not add networking, filesystem, SD, WebUI, album, OTA, Home Assistant, or secret storage.
+- Do not own the network/BLE stack or add direct system networking, filesystem, SD, WebUI, album, self-OTA, Home Assistant, or secret storage. Application-level BLE business protocols through the ABI 2.1 host service are supported; installation remains the host's job.
 
 ## Build and test
 
@@ -38,7 +42,7 @@ idf.py -B build-so -DIDF_TARGET=esp32s3 \
 
 For ABI 2 use the mirrored `components/app_sdk` header and the host `docs-runtime-v2.md` contract. Never import background tasks or board APIs into ABI 2 apps. Keep the SDK copy byte-identical to host.
 
-After legacy driver changes, inspect both artifacts and test module staging/activation/rollback. Rebuild `../photopainter-host` only when changing its fixed ABI or framework. Do not claim real display success without HTTP 200 or an authenticated BLE image-completion receipt, plus human confirmation of content, orientation, and colors. BLE PNG input reuses the same application ABI; custom GATT is not required for image reception.
+After legacy driver changes, inspect both artifacts and test module staging/activation/rollback. Rebuild `../photopainter-host` only when changing its fixed ABI or framework. Do not claim real display success without HTTP 200 or an authenticated BLE image-completion receipt, plus human confirmation of content, orientation, and colors. The old host image path reuses PNG INPUT for compatibility; the new app-owned path requires the application's ABI 2.1 service and its own tested receive protocol.
 
 ## Secrets and hardware
 
