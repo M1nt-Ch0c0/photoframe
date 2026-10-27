@@ -1,6 +1,6 @@
 # photoframe BLE 图片输入 v1
 
-当前开发分支使用 ABI 2.2，新增单所有权 L2CAP CoC，保留原 ABI 2.1 GATT 图片协议。
+当前实现使用 ABI 2.2，功能提交 `e373687` 已推送 main，新增单所有权 L2CAP CoC，保留原 ABI 2.1 GATT 图片协议。
 相框 ELF 拥有 PNG 缓冲、SHA-256、收图状态和近期回执；宿主提供鉴权、队列、唯一
 App Manager 和同步显示。新 APP 需要配套 ABI 2.2 宿主；分区表和安装包格式不变。
 旧宿主图片 opcode 15/16/17 保留，电脑端主路径不使用它们。
