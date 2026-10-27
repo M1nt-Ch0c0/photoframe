@@ -13,7 +13,7 @@
 #include "ble_image.h"
 #include <stdlib.h>
 #include <string.h>
-APP_MANIFEST_BLE("photoframe","Photo frame",APP_INPUT_PNG,APP_REQUIRES_DISPLAY);
+APP_MANIFEST_COC("photoframe","Photo frame",APP_INPUT_PNG,APP_REQUIRES_DISPLAY);
 #define FRAME_CACHE_VERSION 1u
 /* The waiting page and restoration policy belong to the app, never the host. */
 static void waiting(uint8_t *frame) {
@@ -60,6 +60,9 @@ int main(int argc,char **argv) {
     } else if(c->event==APP_EVENT_BLE) {
         if(!c->data || c->data_size!=sizeof(app_ble_event_v2_t))r=APP_ERR_ARGUMENT;
         else r=ble_image_event((const app_ble_event_v2_t *)c->data);
+    } else if(c->event==APP_EVENT_COC) {
+        if(!c->data || c->data_size!=sizeof(app_coc_event_v22_t))r=APP_ERR_ARGUMENT;
+        else r=ble_image_coc_event((const app_coc_event_v22_t *)c->data);
     } else if(c->event==APP_EVENT_INPUT) {
         /* HTTP PNG cannot interrupt or interleave an app-owned BLE receive.
          * Keep the legacy input error (422), without unloading the app. */

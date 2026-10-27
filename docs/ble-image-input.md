@@ -1,8 +1,27 @@
 # photoframe BLE 图片输入 v1
 
-此实现使用已有 ABI 2.1。相框 ELF 拥有 PNG 缓冲、SHA-256、收图状态和近期完成回执；
-宿主提供鉴权、受管 BLE 事件、唯一 App Manager 和同步显示。宿主固件、SDK、导入表、
-分区表和安装包格式均未改变。旧宿主图片 opcode 15/16/17 保留，电脑端新主路径不使用它们。
+当前开发分支使用 ABI 2.2，新增单所有权 L2CAP CoC，保留原 ABI 2.1 GATT 图片协议。
+相框 ELF 拥有 PNG 缓冲、SHA-256、收图状态和近期回执；宿主提供鉴权、队列、唯一
+App Manager 和同步显示。新 APP 需要配套 ABI 2.2 宿主；分区表和安装包格式不变。
+旧宿主图片 opcode 15/16/17 保留，电脑端主路径不使用它们。
+
+## ABI 2.2 CoC 扩展（2026-10-27）
+
+APP 使用 `APP_MANIFEST_COC`，START 注册 4096 字节 SDU 预算及 RX/TX 各四槽的唯一 CoC。
+既有 GATT 命令和 64 字节 `PFI1` 回执继续有效；CoC 内使用相同图片命令，不改业务版本号。
+宿主无线封套和密钥属于宿主，见兄弟仓 `photopainter-host/docs/abi-2-2-coc.md`。
+
+- BEGIN、COMMIT、CANCEL、QUERY：各返回一条相同的 64 字节业务回执。
+- DATA/CHUNK：最大图片部分为协商应用记录上限减 22；典型 4058 字节记录可传 4036 字节图片。
+- 成功 CHUNK 不返回逐块回执，依靠 CoC credits 施加背压；错误 CHUNK 的失败结果保留至 COMMIT/QUERY。
+- 每次 APP_EVENT_COC 最多处理四条记录；发送队列满时保留待发回执，等待 TX_READY，避免阻塞 Manager。
+- GATT 和 CoC 共用同一图片接收状态；接收中的图片绑定入口/session，另一入口不能覆盖它。
+- CoC 断线取消尚未提交的接收，保留近期终态回执。COMMIT 已进入显示时，断线不取消显示；重新连接只能 QUERY 原请求。
+- 原有整图长度/SHA/PNG 检查、最多 5 MiB、60 秒接收空闲期限和最终 POWER_OFF 成功语义不变。
+
+2026-10-27 已在v20取得一次真实CoC回执：67,509字节发送阶段2.477秒，随后物理刷新与POWER_OFF完成。发送阶段均速26.6 KiB/s，不含全部连接和刷屏时间；不是完整稳定性验收，详细记录见项目Wiki状态页。
+
+## 原 GATT 协议
 
 ## 服务与传输
 

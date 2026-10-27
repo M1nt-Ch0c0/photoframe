@@ -20,12 +20,15 @@ static const app_ble_service_v2_t service={
 static uint8_t active[64],receipts[4][64],reply[64];
 static unsigned next_receipt;
 static uint8_t *input;
+static uint32_t input_session,coc_session;
+static uint8_t coc_buffer[4096],coc_reply[64];
+static bool coc_reply_pending;
 static uint64_t last_activity;
 static image_sha256_t hash;
 static uint32_t u32(const uint8_t *p) {return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;}
 static void put32(uint8_t *p,uint32_t n) {for(unsigned i=0;i<4;i++)p[i]=(uint8_t)(n>>(8*i));}
 static void empty(uint8_t *r,const uint8_t *id) {memset(r,0,64);memcpy(r,"PFI1",4);if(id)memcpy(r+8,id,16);}
-static void release_input(void) {free(input);input=NULL;memset(&hash,0,sizeof(hash));}
+static void release_input(void) {free(input);input=NULL;input_session=0;memset(&hash,0,sizeof(hash));}
 static void terminal(unsigned state,unsigned error) {
     active[4]=(uint8_t)state;active[6]=(uint8_t)error;active[7]=0;
     memcpy(receipts[next_receipt++%4],active,64);memcpy(reply,active,64);release_input();
@@ -47,10 +50,15 @@ int ble_image_start(void) {
     int r=app_host_ble_register_v2(&service);
     if(r==APP_OK)r=publish();
     if(r==APP_OK)r=app_host_timer_v2(1,1000);
+    if(r==APP_OK){
+        const app_coc_config_v22_t c={sizeof(c),4096,4,4};
+        r=app_host_coc_open_v22(&c);
+    }
     if(r!=APP_OK)ble_image_stop();
     return r;
 }
 void ble_image_stop(void) {
+    (void)app_host_coc_close_v22();coc_session=0;coc_reply_pending=false;
     release_input();memset(receipts,0,sizeof(receipts));memset(active,0,sizeof(active));memset(reply,0,sizeof(reply));
     (void)app_host_timer_v2(1,0);(void)app_host_ble_unregister_v2();
 }
@@ -58,9 +66,9 @@ static int finish_event(void) {
     int r=publish();if(r!=APP_OK)ble_image_stop();return r;
 }
 int ble_image_tick(void) {expire();return finish_event();}
-static void command(const uint8_t *p,uint32_t n) {
+static void command(const uint8_t *p,uint32_t n,uint32_t maximum) {
     unsigned op=n>1?p[1]:0;
-    if(n<18 || n>128 || p[0]!=1 || op<IMAGE_BEGIN || op>IMAGE_QUERY) {reject(NULL,op,IMAGE_INVALID);return;}
+    if(n<18 || n>maximum || p[0]!=1 || op<IMAGE_BEGIN || op>IMAGE_QUERY) {reject(NULL,op,IMAGE_INVALID);return;}
     const uint8_t *id=p+2;
     uint8_t zero[16]={0};
     if(!memcmp(id,zero,16)){reject(id,op,IMAGE_INVALID);return;}
@@ -130,7 +138,48 @@ int ble_image_event(const app_ble_event_v2_t *e) {
         ble_image_stop();return APP_ERR_RUNTIME;
     } else if(e->type==APP_BLE_WRITTEN) {
         if(e->characteristic!=IMAGE_COMMAND || e->data_size>128)reject(NULL,0,IMAGE_INVALID);
-        else command(e->data,e->data_size);
+        else if(input && input_session)reject(e->data_size>=18?e->data+2:NULL,e->data_size>1?e->data[1]:0,IMAGE_BUSY);
+        else command(e->data,e->data_size,128);
+    }
+    return finish_event();
+}
+static bool flush_coc_reply(void){
+    if(!coc_reply_pending)return true;
+    int r=app_host_coc_send_v22(coc_session,coc_reply,sizeof(coc_reply));
+    if(r==APP_COC_AGAIN)return false;
+    coc_reply_pending=false;
+    return r==APP_COC_OK;
+}
+int ble_image_coc_event(const app_coc_event_v22_t *e){
+    expire();
+    if(e->type&(APP_COC_CONNECTED|APP_COC_DISCONNECTED|APP_COC_ERROR)){
+        if(input && input_session)terminal(IMAGE_CANCELED,IMAGE_DISCONNECTED);
+        coc_reply_pending=false;
+        coc_session=(e->type&APP_COC_CONNECTED)?e->session:0;
+    }
+    if(!coc_session || e->session!=coc_session)return finish_event();
+    if(!flush_coc_reply())return finish_event();
+    /* Four records per entry keeps Manager cooperative. Successful DATA has
+     * no per-chunk response: CoC credits supply transport backpressure.
+     * BEGIN/COMMIT/QUERY/CANCEL retain the same 64-byte application receipt. */
+    for(unsigned budget=0;budget<4;budget++){
+        uint32_t n=0;int r=app_host_coc_recv_v22(coc_session,coc_buffer,sizeof(coc_buffer),&n);
+        if(r!=APP_COC_OK)break;
+        unsigned op=n>1?coc_buffer[1]:0;
+        if(input && input_session!=coc_session){
+            reject(n>=18?coc_buffer+2:NULL,op,IMAGE_BUSY);
+        }else{
+            command(coc_buffer,n,sizeof(coc_buffer));
+            if(input)input_session=coc_session;
+            /* Remember a failed DATA result for the final COMMIT/QUERY; do
+             * not flood the reverse channel with one reply per rejected block. */
+            if(op==IMAGE_CHUNK && input && reply[4]==IMAGE_REJECTED && n>=18 && !memcmp(active+8,coc_buffer+2,16))
+                terminal(IMAGE_FAILED,reply[6]);
+        }
+        if(op!=IMAGE_CHUNK){
+            memcpy(coc_reply,reply,64);coc_reply_pending=true;
+            if(!flush_coc_reply())break;
+        }
     }
     return finish_event();
 }

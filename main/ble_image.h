@@ -12,5 +12,6 @@ enum { IMAGE_OK,IMAGE_INVALID,IMAGE_BUSY,IMAGE_OFFSET,IMAGE_CONFLICT,IMAGE_MEMOR
 int ble_image_start(void);
 void ble_image_stop(void);
 int ble_image_event(const app_ble_event_v2_t *event);
+int ble_image_coc_event(const app_coc_event_v22_t *event);
 int ble_image_tick(void);
 int ble_image_receiving(void);
