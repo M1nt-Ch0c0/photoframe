@@ -1,5 +1,7 @@
 # photoframe
 
+**配对 v2 尚未实机验证。** 新宿主负责按键确认、持久 owner 与重置；本 APP 的 ABI 2.2 和 PFI1 图片协议保持不变，无需为配对重装 v20。新版 host 的旧 token HTTP 控制入口返回 410。今晚仅完成离线测试/构建，早上按 [验收清单](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/docs/MORNING-ACCEPTANCE.md) 验证。
+
 当前 main 已包含 **ABI 2.2 单所有权 CoC**（功能提交 `e373687`），大块图片数据连续传输，复用原 PNG 校验、显示和回执，仍保留 128 字节 GATT 兼容协议。需要配套的新宿主；协议见 [BLE 图片输入](docs/ble-image-input.md)。2026-10-27 已安装 v20 并确认运行，CoC 已取得真实显示完成回执。
 
 **历史基线：** ABI 2.1 APP 收图实现始于 `3b09a00`，旧实机与回滚记录截至 `e910153`。这些 [验收记录](docs/validation-ble-input-2026-10-23.md) 按发生时版本解释，当前 ABI 2.2 与 v20 状态见项目 Wiki。
@@ -47,7 +49,7 @@ python3 -m unittest discover -s examples/color-test -p 'test_*.py'
 
 ## 推图
 
-默认BLE优先由本APP的ABI 2.2 CoC接收，旧电脑端仍可使用其GATT兼容服务；电脑端命令为 `ai-quota-frame ble push --file frame.png`，常驻服务设置 `PHOTOFRAME_PUSH_TRANSPORT=ble`。服务 UUID、分块与回执契约见 [应用协议](docs/ble-image-input.md)。宿主 HTTP 和旧专用 BLE PNG 通道保留兼容。所有路径都不能抢占当前应用；发现、鉴权和 OTA 始终由宿主提供。命令见 [电脑端指南](https://github.com/M1nt-Ch0c0/ai-quota-frame/blob/main/docs/ble.md)。
+默认BLE优先由本APP的ABI 2.2 CoC接收，旧电脑端仍可使用其GATT兼容服务；电脑端命令为 `ai-quota-frame ble push --file frame.png`，常驻服务设置 `PHOTOFRAME_PUSH_TRANSPORT=ble`。服务 UUID、分块与回执契约见 [应用协议](docs/ble-image-input.md)。旧专用 BLE PNG 通道仅作兼容实现；v2 宿主旧 token HTTP 控制入口已退役为 410。所有路径都不能抢占当前应用；发现、鉴权和 OTA 始终由宿主提供。命令见 [电脑端指南](https://github.com/M1nt-Ch0c0/ai-quota-frame/blob/main/docs/ble.md)。
 
 共享对象公开 ABI：
 
@@ -80,7 +82,7 @@ void photoframe_host_report_result(int result);
 
 ## 鉴权
 
-组件不保存密钥，也不实现网络鉴权。HTTP Bearer 和 BLE HMAC 只由宿主固件校验；宿主检查鉴权和请求大小后，才把内存缓冲区交给本组件，完整 PNG 验证由组件在触碰面板前完成。HTTP 200 或 BLE 鉴权完成凭据只在实体刷新和最终 POWER_OFF 等待结束后返回，仍需人工确认显示效果。不得把 Wi-Fi 密码、推图码、NVS 镜像或其他密钥提交到此仓库。
+组件不保存密钥，也不实现网络鉴权。v2 的物理配对、BondAuth 和 BLE HMAC 只由宿主校验；旧 HTTP Bearer 仅属于历史 v1 固件。宿主检查鉴权和请求大小后，才把内存缓冲区交给本组件，完整 PNG 验证由组件在触碰面板前完成。当前 BLE 完成回执只在实体刷新和最终 POWER_OFF 等待结束后返回，仍需人工确认显示效果。不得把 Wi-Fi 密码、推图码、NVS 镜像或其他密钥提交到此仓库。
 
 电源映射依据：[官方原理图](https://files.waveshare.com/wiki/ESP32-S3-PhotoPainter/ESP32-S3-PhotoPainter-Schematic.pdf)中 AXP2101 的 pin 15 / ALDO4 连接 `EPD_VCC`，pin 16 / ALDO3 连接 `Audio_VCC`。屏幕电压寄存器为 `0x95`，使能为 `0x90` 的 bit 3；读改写保留其他电源位。
 

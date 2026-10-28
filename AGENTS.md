@@ -4,6 +4,8 @@
 
 Read this file before changing the loadable display component. For blank-machine setup, cross-repository integration, deployment, or hardware diagnosis, also read the complete project Skill in the sibling host checkout: `../photopainter-host/.agents/skills/develop-photopainter-stack/SKILL.md`.
 
+**2026-10-29 source contract:** physical pairing v2 is implemented by the host and clients; the photoframe ABI 2.2 / PFI1 v1 contract is unchanged. This pairing release is **尚未实机验证**. Legacy HTTP token paths are not active control routes on a v2 host. Overnight work is offline only; hardware acceptance follows the shared morning checklist.
+
 ## Repository role
 
 This repository owns strict PNG decoding, six-color validation, app-owned first screens/restoration and independent `.app.elf` deliverables. Default ABI 2 uses the host board service for rotation, packing and E6/power I/O; legacy ABI 1 and `.so` retain the old driver. It must not own Wi-Fi, HTTP, authentication, scheduling, secrets, or a complete device firmware.

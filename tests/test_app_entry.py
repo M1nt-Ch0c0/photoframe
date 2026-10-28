@@ -19,6 +19,14 @@ int32_t app_host_display_v2(const uint8_t *p,uint32_t n){assert(n==APP_FRAME_BYT
 int32_t app_host_cache_put_v2(uint32_t v,const uint8_t *p,uint32_t n){assert(v==1&&n==APP_FRAME_BYTES);(void)p;puts++;return cache_result;}
 const uint8_t *app_host_cache_get_v2(uint32_t v,uint32_t *n){assert(v==1);*n=has_cache?APP_FRAME_BYTES:0;return has_cache?cached:NULL;}
 int photoframe_decode_indexed(const uint8_t *p,size_t n,uint8_t **out){assert(p&&n==3);*out=NULL;if(decode_result)return decode_result;*out=calloc(1,APP_FRAME_BYTES);return 0;}
+/* This suite isolates first-screen/cache policy. The real GATT/CoC receiver
+ * and its lifecycle are exercised separately by photoframe_ble_tests. */
+int ble_image_start(void){return APP_OK;}
+void ble_image_stop(void){}
+int ble_image_receiving(void){return 0;}
+int ble_image_tick(void){return APP_OK;}
+int ble_image_event(const app_ble_event_v2_t *e){(void)e;assert(0);return APP_ERR_RUNTIME;}
+int ble_image_coc_event(const app_coc_event_v22_t *e){(void)e;assert(0);return APP_ERR_RUNTIME;}
 void reset(int event,int cache,int decode,int display,int store){c=(app_context_v2_t){.event=event,.event_id=99,.generation=5,.input_type=1,.data=(const uint8_t *)"png",.data_size=3};has_cache=cache;decode_result=decode;display_result=display;cache_result=store;renders=puts=flags=black=0;report=999;}
 int metric(int i){return i==0?renders:i==1?puts:i==2?report:i==3?flags:black;}
 '''
