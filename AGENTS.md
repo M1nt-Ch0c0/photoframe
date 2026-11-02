@@ -1,6 +1,6 @@
 # Photoframe component agent guide
 
-**Current development baseline (2026-10-29):** photoframe v21 / ABI 2.3 shares a pure C transaction core across legacy GATT, CoC and the generic mailbox. Phone Web GATT and physical completion/user visual confirmation passed; the historical v20/Mac CoC evidence remains scoped to that run. Source, deployment and platform limits are tracked in the [status matrix](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/docs/09-status.md).
+**Current development baseline (2026-10-29):** photoframe v21 / ABI 2.3 shares a pure C transaction core across legacy GATT, CoC and the generic mailbox. Phone Web GATT and physical completion/user visual confirmation passed; the historical v20/Mac CoC evidence remains scoped to that run. Source, deployment and platform limits are tracked in the [status matrix](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/docs/09-versions-and-limits.md).
 
 Read this file before changing the loadable display component. For blank-machine setup, cross-repository integration, deployment, or hardware diagnosis, also read the complete project Skill in the sibling host checkout: `../photopainter-host/.agents/skills/develop-photopainter-stack/SKILL.md`.
 

@@ -1,6 +1,6 @@
 # photoframe
 
-当前相框应用为 **v21 / ABI 2.3**：纯 C 图片事务核心由原 GATT、CoC 和新通用消息适配器共用。手机 Web GATT 67,626 字节上传 7.9 秒、刷新等待 20.3 秒，签名完成回执和人眼确认通过。需要支持 ABI 2.3 的宿主；PFI1 命令/回执格式及旧 ABI 布局不变。验证范围见 [收图协议](docs/ble-image-input.md) 和 [状态页](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/docs/09-status.md)。
+当前相框应用为 **v21 / ABI 2.3**：纯 C 图片事务核心由原 GATT、CoC 和新通用消息适配器共用。手机 Web GATT 67,626 字节上传 7.9 秒、刷新等待 20.3 秒，签名完成回执和人眼确认通过。需要支持 ABI 2.3 的宿主；PFI1 命令/回执格式及旧 ABI 布局不变。验证范围见 [收图协议](docs/ble-image-input.md) 和 [状态页](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/docs/09-versions-and-limits.md)。
 
 **CoC 历史基线：**ABI 2.2 单所有权 CoC（功能提交 `e373687`）已在 2026-10-27 的 v20/Mac 路径取得显示完成回执。v21 保留这条适配器及 128 字节 GATT 兼容协议，但本轮手机的提速实测来自通用消息 GATT，不是手机原生 CoC。
 
