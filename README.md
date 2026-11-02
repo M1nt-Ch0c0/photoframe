@@ -1,24 +1,24 @@
 # photoframe
 
-**配对 v2 尚未实机验证。** 新宿主负责按键确认、持久 owner 与重置；本 APP 的 ABI 2.2 和 PFI1 图片协议保持不变，无需为配对重装 v20。新版 host 的旧 token HTTP 控制入口返回 410。今晚仅完成离线测试/构建，早上按 [验收清单](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/docs/MORNING-ACCEPTANCE.md) 验证。
+当前相框应用为 **v21 / ABI 2.3**：纯 C 图片事务核心由原 GATT、CoC 和新通用消息适配器共用。手机 Web GATT 67,626 字节上传 7.9 秒、刷新等待 20.3 秒，签名完成回执和人眼确认通过。需要支持 ABI 2.3 的宿主；PFI1 命令/回执格式及旧 ABI 布局不变。验证范围见 [收图协议](docs/ble-image-input.md) 和 [状态页](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/docs/09-status.md)。
 
-当前 main 已包含 **ABI 2.2 单所有权 CoC**（功能提交 `e373687`），大块图片数据连续传输，复用原 PNG 校验、显示和回执，仍保留 128 字节 GATT 兼容协议。需要配套的新宿主；协议见 [BLE 图片输入](docs/ble-image-input.md)。2026-10-27 已安装 v20 并确认运行，CoC 已取得真实显示完成回执。
+**CoC 历史基线：**ABI 2.2 单所有权 CoC（功能提交 `e373687`）已在 2026-10-27 的 v20/Mac 路径取得显示完成回执。v21 保留这条适配器及 128 字节 GATT 兼容协议，但本轮手机的提速实测来自通用消息 GATT，不是手机原生 CoC。
 
-**历史基线：** ABI 2.1 APP 收图实现始于 `3b09a00`，旧实机与回滚记录截至 `e910153`。这些 [验收记录](docs/validation-ble-input-2026-10-23.md) 按发生时版本解释，当前 ABI 2.2 与 v20 状态见项目 Wiki。
+**历史基线：** ABI 2.1 APP 收图实现始于 `3b09a00`，旧实机与回滚记录截至 `e910153`。这些 [验收记录](docs/validation-ble-input-2026-10-23.md) 按发生时版本解释，最新 v21 的状态与不同日期的验收范围见项目 Wiki。
 
 > **AI / 开发者入口：**先阅读 [`AGENTS.md`](AGENTS.md)。空白电脑部署、三仓联调和真机诊断使用 [`develop-photopainter-stack`](https://github.com/M1nt-Ch0c0/photopainter-host/blob/main/.agents/skills/develop-photopainter-stack/SKILL.md)。
 
-五个仓库的职责、架构图、耦合边界与修改影响，见 [PhotoPainter 架构总览](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/ARCHITECTURE.md)。
+五个仓库的职责、架构图、耦合边界与修改影响，见 [PhotoPainter 架构总览](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/docs/01-overview.md)。
 
-**应用开发从 [开发者 Wiki](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/wiki/Home.md) 开始。** 本仓库维护应用入口、业务输入、图片验证和示例；宿主框架只提供运行、鉴权、更新和通用服务。
+**应用开发从 [开发者 Wiki](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/README.md) 开始。** 本仓库维护应用入口、业务输入、图片验证和示例；宿主框架只提供运行、鉴权、更新和通用服务。
 
-相框 APP 通过 ABI 2.2 CoC 接收大块图片，复用收图状态机、APP 内 SHA-256、断线/超时清理与完成回执；ABI 2.1 GATT 小块路径继续兼容。电脑端不使用旧宿主 PNG opcode 作为主路径。协议见 [BLE 收图](docs/ble-image-input.md)，已测范围和剩余问题见 [实机记录](docs/validation-ble-input-2026-10-23.md)。
+相框 APP 使用同一事务核心处理 BEGIN/DATA/COMMIT/QUERY/CANCEL、SHA-256、断线/超时清理及完成回执。ABI 2.3 GATT 可用每块 4025 字节图片；ABI 2.2 CoC 大块输入和 ABI 2.1 GATT 小块路径继续兼容。电脑端不使用旧宿主 PNG opcode 作为主路径。协议见 [BLE 收图](docs/ble-image-input.md)，已测范围和剩余问题见 [实机记录](docs/validation-ble-input-2026-10-23.md)。
 
 默认 `.app.elf` 已使用 ABI 2：启动时恢复缓存或显示 `WAITING FOR IMAGE`，收到 PNG 后更新屏幕；宿主负责六色逻辑帧的板级显示。必须先部署支持 ABI 2 的新宿主。完整规则见 [运行层指南](https://github.com/M1nt-Ch0c0/photopainter-host/blob/main/docs-runtime-v2.md)。
 
 ## 构建与安装
 
-SDK 包含 ABI 2.1 GATT 与 ABI 2.2 CoC；默认相框声明2.2，需要配套宿主，旧2.0/2.1应用继续兼容。需要应用自定义蓝牙服务时使用 `APP_MANIFEST_BLE`，参考 [BLE 回显示例](examples/ble-echo/README.md)。宿主保存 GATT 描述和数据副本，通过事件交付写入，应用切出时清理服务；应用不直接控制蓝牙协议栈、发现广播或安装通道。
+SDK 包含 ABI 2.1 GATT、ABI 2.2 CoC 和 ABI 2.3 通用消息；默认相框使用 `APP_MANIFEST_CHANNEL` 声明 2.3，需要配套宿主，旧 2.0/2.1/2.2 应用继续兼容。需要应用自定义蓝牙服务时使用 `APP_MANIFEST_BLE`，参考 [BLE 回显示例](examples/ble-echo/README.md)。宿主保存 GATT 描述和数据副本，通过事件交付写入，应用切出时清理服务；应用不直接控制蓝牙协议栈、发现广播或安装通道。
 
 本仓库为 7.3 英寸、800×480、六色 Spectra 6 PhotoPainter 提供独立可加载组件，不是整机固件。使用 ESP-IDF commit `5e6f53cdb31fe5708eae3f55af9737be2822db22`（约 v6.0.3），分别构建应用 ELF 与共享对象：
 

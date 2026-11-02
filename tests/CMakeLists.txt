@@ -33,7 +33,7 @@ target_include_directories(ble_echo_native_tests PRIVATE ../components/app_sdk/i
 target_compile_options(ble_echo_native_tests PRIVATE -Wall -Wextra -Werror)
 add_test(NAME ble_echo_native_tests COMMAND ble_echo_native_tests)
 
-add_library(photoframe_entry OBJECT ../main/entry.c ../main/ble_image.c ../main/image_sha256.c)
+add_library(photoframe_entry OBJECT ../main/entry.c ../main/ble_image.c ../main/image_transfer.c ../main/image_sha256.c)
 target_include_directories(photoframe_entry PRIVATE ../components/app_sdk/include ../components/photoframe/include ../main)
 target_compile_definitions(photoframe_entry PRIVATE main=app_entry PHOTOFRAME_APP_ENTRY=1 PHOTOFRAME_ABI_2=1
     malloc=image_test_malloc free=image_test_free)

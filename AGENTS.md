@@ -1,18 +1,18 @@
 # Photoframe component agent guide
 
-**Current development baseline (2026-10-27):** ABI 2.2 single-owner L2CAP CoC, photoframe v20 and the Mac sender have been deployed with a real completion receipt. The SwiftUI console lives in the independent `photopainter-console` repository; `ai-quota-frame` retains the serialized device backend. Source publication, current slots and verification limits are tracked in the [status matrix](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/wiki/Status-and-Evidence.md).
+**Current development baseline (2026-10-29):** photoframe v21 / ABI 2.3 shares a pure C transaction core across legacy GATT, CoC and the generic mailbox. Phone Web GATT and physical completion/user visual confirmation passed; the historical v20/Mac CoC evidence remains scoped to that run. Source, deployment and platform limits are tracked in the [status matrix](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/docs/09-status.md).
 
 Read this file before changing the loadable display component. For blank-machine setup, cross-repository integration, deployment, or hardware diagnosis, also read the complete project Skill in the sibling host checkout: `../photopainter-host/.agents/skills/develop-photopainter-stack/SKILL.md`.
 
-**2026-10-29 source contract:** physical pairing v2 is implemented by the host and clients; the photoframe ABI 2.2 / PFI1 v1 contract is unchanged. This pairing release is **尚未实机验证**. Legacy HTTP token paths are not active control routes on a v2 host. Overnight work is offline only; hardware acceptance follows the shared morning checklist.
+**2026-10-29 source contract:** pairing v2 is host-owned; v21 declares ABI 2.3 while retaining PFI1 v1 and legacy ABI layouts. Saved-bond phone authentication and image completion are verified; fresh-pair/reset acceptance is not inferred. The prior offline-only restriction was lifted for the explicitly authorized recorded deployments. Future device operations still require authorization.
 
 ## Repository role
 
 This repository owns strict PNG decoding, six-color validation, app-owned first screens/restoration and independent `.app.elf` deliverables. Default ABI 2 uses the host board service for rotation, packing and E6/power I/O; legacy ABI 1 and `.so` retain the old driver. It must not own Wi-Fi, HTTP, authentication, scheduling, secrets, or a complete device firmware.
 
-The host loads the app ELF from independent A/B data slots. Package and stage business updates with the sibling host tools/module.py; no host rebuild is required for ABI-compatible changes. Read ../photopainter-host/docs-module-slots.md. The `.so` remains an additional artifact, not the deployed profile. The [developer Wiki](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/wiki/Home.md) is the framework entry point; application-specific input protocols and decoder behavior belong here.
+The host loads the app ELF from independent A/B data slots. Package and stage business updates with the sibling host tools/module.py; no host rebuild is required for ABI-compatible changes. Read ../photopainter-host/docs-module-slots.md. The `.so` remains an additional artifact, not the deployed profile. The [developer Wiki](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/README.md) is the framework entry point; application-specific input protocols and decoder behavior belong here.
 
-The current app uses ABI 2.2 CoC for bulk images and retains the ABI 2.1 GATT path. Image reception, integrity checks, transfer state and completion receipts remain application-owned. Use the existing managed BLE/auth/display services and manager; do not extend the dedicated host PNG protocol. See docs/ble-image-input.md and docs/validation-ble-input-2026-10-23.md for the implemented protocol and hardware limits.
+The current app uses the ABI 2.3 generic mailbox and retains ABI 2.2 CoC and ABI 2.1 GATT adapters. Image reception, integrity checks, transfer state and completion receipts remain application-owned. Use the existing managed BLE/auth/display services and manager; do not extend the dedicated host PNG protocol. See docs/ble-image-input.md and docs/validation-ble-input-2026-10-23.md for the implemented protocol and hardware limits.
 
 ## Non-negotiable constraints
 
@@ -24,7 +24,7 @@ The current app uses ABI 2.2 CoC for bulk images and retains the ABI 2.1 GATT pa
 - Fully decode and validate before AXP2101, GPIO, SPI, or panel I/O.
 - Return success only after final POWER_OFF and BUSY completion.
 - Preserve the published C ABI, host bridge symbols, and numeric result codes unless the host is updated atomically.
-- Do not own the network/BLE stack or add direct system networking, filesystem, SD, WebUI, album, self-OTA, Home Assistant, or secret storage. Application-level BLE business protocols through the ABI 2.1 GATT and ABI 2.2 CoC host services are supported; installation remains the host's job.
+- Do not own the network/BLE stack or add direct system networking, filesystem, SD, WebUI, album, self-OTA, Home Assistant, or secret storage. Application-level protocols through ABI 2.1 GATT, ABI 2.2 CoC and ABI 2.3 generic host messages are supported; installation remains the host's job.
 
 ## Build and test
 

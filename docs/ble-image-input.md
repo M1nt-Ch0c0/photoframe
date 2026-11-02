@@ -1,5 +1,8 @@
 # photoframe BLE 图片输入 v1
 
+2026-10-29：v21 增加 ABI 2.3 通用消息通道，三条适配器共用纯 C 图片事务核心；旧 GATT/CoC 及 PFI1 回执格式保持兼容。新 GATT 每个应用消息可携带 4025 B 图片，一次交换直接返回累计偏移。实机手机 Web GATT 67,626 B 上传 7.9 秒，刷新 20.3 秒，签名完成回执和人眼确认通过。精确接口见 [宿主 ABI 2.3](https://github.com/M1nt-Ch0c0/photopainter-host/blob/main/docs/abi-2-3-channel.md)。本轮没有手机原生 CoC / Wi-Fi 验收。
+
+
 **2026-10-29 配对 v2：尚未实机验证。** 宿主负责新的六位码、功能键批准、持久 owner 和长按重置；PFI1 业务版本仍为 1，APP ABI 仍为 2.2。客户端先完成 BondAuth，再使用本文协议。图片待确认事务还须钉住配对 BID，换绑后不能恢复旧 owner 的事务。完整字节合同见 [host 配对 v2](https://github.com/M1nt-Ch0c0/photopainter-host/blob/main/docs/ble-pairing-v2.md)。
 
 当前实现使用 ABI 2.2，功能提交 `e373687` 已推送 main，新增单所有权 L2CAP CoC，保留原 ABI 2.1 GATT 图片协议。

@@ -9,7 +9,7 @@
 #include <string.h>
 int app_entry(int,char **);
 extern const app_manifest_v2_t app_manifest;
-static app_context_v2_t context={.size=sizeof(context),.abi_major=2,.abi_minor=2,.generation=1};
+static app_context_v2_t context={.size=sizeof(context),.abi_major=2,.abi_minor=3,.generation=1};
 static uint8_t status[64],id[16]={1},digest[32];
 static uint64_t now;
 static int registered,completed,displays,display_result,fail_alloc;
@@ -38,7 +38,7 @@ void app_host_complete_v2(const app_result_v2_t *r) {
 }
 int32_t app_host_display_v2(const uint8_t *p,uint32_t n) {
     assert(n==APP_FRAME_BYTES && p && context.event!=APP_EVENT_STOP);
-    if(context.event==APP_EVENT_BLE||context.event==APP_EVENT_COC)assert(status[4]==IMAGE_PROCESSING);
+    if(context.event==APP_EVENT_BLE||context.event==APP_EVENT_COC||context.event==APP_EVENT_CHANNEL)assert(status[4]==IMAGE_PROCESSING);
     displays++;return display_result;
 }
 const uint8_t *app_host_cache_get_v2(uint32_t v,uint32_t *n){assert(v==1);*n=0;return NULL;}
@@ -67,17 +67,37 @@ int32_t app_host_coc_send_v22(uint32_t session,const void *p,uint32_t n) {
     if(coc_blocked)return APP_COC_AGAIN;
     memcpy(coc_output,p,n);coc_sends++;return APP_COC_OK;
 }
+static bool channel_opened;
+static uint8_t channel_input[4096],channel_output[64];static uint32_t channel_bytes;
+int32_t app_host_channel_register_v23(const app_channel_config_v23_t *c){
+    assert(c->size==sizeof(*c)&&c->max_message_bytes==4096&&c->max_reply_bytes==64);channel_opened=true;return 0;
+}
+int32_t app_host_channel_close_v23(void){channel_opened=false;channel_bytes=0;return 0;}
+int32_t app_host_channel_recv_v23(uint32_t sid,void *p,uint32_t cap,uint32_t *n){
+    assert(channel_opened&&sid==77&&channel_bytes&&cap>=channel_bytes);
+    *n=channel_bytes;memcpy(p,channel_input,*n);channel_bytes=0;return 0;
+}
+int32_t app_host_channel_send_v23(uint32_t sid,const void *p,uint32_t n){
+    assert(channel_opened&&sid==77&&n==64);memcpy(channel_output,p,n);return 0;
+}
 static int event(unsigned type,const void *p,uint32_t n) {
     context.event=type;context.event_id++;context.data=p;context.data_size=n;
     int before=completed;int r=app_entry(0,NULL);assert(completed==before+1);return r;
 }
 static void boundary(unsigned type) {app_ble_event_v2_t e={.type=type};assert(event(APP_EVENT_BLE,&e,sizeof(e))==0);}
 static void coc_event(unsigned type,uint32_t session) {app_coc_event_v22_t e={.type=type,.session=session};assert(event(APP_EVENT_COC,&e,sizeof(e))==0);}
+static void channel_event(unsigned type){app_channel_event_v23_t e={.size=sizeof(e),.type=type,.session=77};assert(event(APP_EVENT_CHANNEL,&e,sizeof(e))==0);}
+static void send_channel(unsigned op,const uint8_t *tail,unsigned n){
+    assert(n+18<=sizeof(channel_input));channel_input[0]=1;channel_input[1]=(uint8_t)op;memcpy(channel_input+2,id,16);
+    if(n)memcpy(channel_input+18,tail,n);
+    channel_bytes=18+n;channel_event(APP_CHANNEL_RX_READY);
+}
 static void put(uint8_t *p,uint32_t x){for(unsigned i=0;i<4;i++)p[i]=(uint8_t)(x>>(8*i));}
 static uint32_t get(const uint8_t *p){return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;}
 static void queue_coc(unsigned op,const uint8_t *tail,unsigned n) {
     assert(!coc_input_size&&18+n<=sizeof(coc_input));coc_input[0]=1;coc_input[1]=(uint8_t)op;memcpy(coc_input+2,id,16);
-    if(n)memcpy(coc_input+18,tail,n);coc_input_size=18+n;
+    if(n)memcpy(coc_input+18,tail,n);
+    coc_input_size=18+n;
 }
 static void send(unsigned op,const uint8_t *tail,unsigned n) {
     app_ble_event_v2_t e={.type=APP_BLE_WRITTEN,.characteristic=0,.data_size=18+n,.data={1}};
@@ -98,7 +118,8 @@ static void sha_vectors(void) {
         "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"};
     for(unsigned i=0;i<3;i++) {
         hash_data((const uint8_t *)messages[i],strlen(messages[i]));char hex[65];
-        for(unsigned j=0;j<32;j++)snprintf(hex+j*2,3,"%02x",digest[j]);assert(!strcmp(hex,expected[i]));
+        for(unsigned j=0;j<32;j++)snprintf(hex+j*2,3,"%02x",digest[j]);
+        assert(!strcmp(hex,expected[i]));
     }
     image_sha256_t s;image_sha256_init(&s);
     for(unsigned i=0;i<1000000;i++)image_sha256_update(&s,(const uint8_t *)"a",1);
@@ -107,7 +128,7 @@ static void sha_vectors(void) {
 }
 int main(void) {
     sha_vectors();
-    assert(app_manifest.abi_minor==2 && !strcmp(app_manifest.id,"photoframe"));
+    assert(app_manifest.abi_minor==3 && !strcmp(app_manifest.id,"photoframe"));
     assert(event(APP_EVENT_START,NULL,0)==0 && registered && displays==1 && live()==0);
     boundary(APP_BLE_CONNECTED);
     png_image image={.version=PNG_IMAGE_VERSION,.width=800,.height=480,.format=PNG_FORMAT_RGB};
@@ -171,5 +192,19 @@ int main(void) {
     queue_coc(IMAGE_CANCEL,NULL,0);reads=coc_reads;coc_event(APP_COC_RX_READY,host_coc_session-1);assert(coc_reads==reads&&live()==1);
     coc_event(APP_COC_DISCONNECTED,host_coc_session);assert(live()==0&&status[6]==IMAGE_DISCONNECTED);coc_input_size=0;
     assert(event(APP_EVENT_STOP,NULL,0)==0&&!coc_opened&&!registered&&live()==0);
+    /* ABI 2.3 generic messages use the same transaction, decoder and final
+     * receipt, and cannot steal a live legacy transport's input. */
+    assert(event(APP_EVENT_START,NULL,0)==0&&channel_opened);
+    channel_event(APP_CHANNEL_CONNECTED);id[0]++;
+    send_channel(IMAGE_BEGIN,begin_data,sizeof(begin_data));assert(live()==1);
+    chunk(0,png,1);assert(status[6]==IMAGE_BUSY&&live()==1);
+    send_channel(IMAGE_CHUNK,bulk,(unsigned)n+4);assert(get(channel_output+28)==n);
+    int before_channel=displays;send_channel(IMAGE_COMMIT,NULL,0);
+    assert(channel_output[4]==IMAGE_COMPLETE&&channel_output[6]==0&&displays==before_channel+1&&live()==0);
+    assert(!memcmp(channel_output+8,id,16)&&!memcmp(channel_output+32,digest,32));
+    send_channel(IMAGE_COMMIT,NULL,0);assert(displays==before_channel+1);
+    id[0]++;send_channel(IMAGE_BEGIN,begin_data,sizeof(begin_data));assert(live()==1);
+    channel_event(APP_CHANNEL_DISCONNECTED);assert(live()==0&&status[6]==IMAGE_DISCONNECTED);
+    assert(event(APP_EVENT_STOP,NULL,0)==0&&!channel_opened&&!registered&&live()==0);
     free(png);return 0;
 }
