@@ -1,41 +1,82 @@
 # photoframe
 
-当前相框应用为 **v21 / ABI 2.3**：纯 C 图片事务核心由原 GATT、CoC 和新通用消息适配器共用。手机 Web GATT 67,626 字节上传 7.9 秒、刷新等待 20.3 秒，签名完成回执和人眼确认通过。需要支持 ABI 2.3 的宿主；PFI1 命令/回执格式及旧 ABI 布局不变。验证范围见 [收图协议](docs/ble-image-input.md) 和 [状态页](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/docs/09-versions-and-limits.md)。
+photoframe 是 PhotoPainter 相框上默认运行的**相框应用**：它通过蓝牙接收一张 800×480 的六色 PNG，校验后交给宿主固件刷到电子纸上，并回传完成回执。本仓库还包含三个示例应用和应用 SDK 头文件的副本。
 
-**CoC 历史基线：**ABI 2.2 单所有权 CoC（功能提交 `e373687`）已在 2026-10-27 的 v20/Mac 路径取得显示完成回执。v21 保留这条适配器及 128 字节 GATT 兼容协议，但本轮手机的提速实测来自通用消息 GATT，不是手机原生 CoC。
+这一页写给要构建、测试或修改 photoframe 的开发者。项目整体介绍、应用的运行原理和完整的写应用教程都在文档主站：
 
-**历史基线：** ABI 2.1 APP 收图实现始于 `3b09a00`，旧实机与回滚记录截至 `e910153`。这些 [验收记录](docs/validation-ble-input-2026-10-23.md) 按发生时版本解释，最新 v21 的状态与不同日期的验收范围见项目 Wiki。
+- [项目介绍](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/docs/01-overview.md)：五个仓库各做什么
+- [设备是怎么工作的](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/docs/03-how-the-device-works.md)：宿主与应用、生命周期、A/B 槽、启动保护
+- [编写一个应用](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/docs/04-writing-an-app.md)：从建工程到装到设备上的完整步骤
+- [应用接口参考](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/docs/05-app-api-reference.md)：`photopainter_app.h` 里的所有接口
 
-> **AI / 开发者入口：**先阅读 [`AGENTS.md`](AGENTS.md)。空白电脑部署、三仓联调和真机诊断使用 [`develop-photopainter-stack`](https://github.com/M1nt-Ch0c0/photopainter-host/blob/main/.agents/skills/develop-photopainter-stack/SKILL.md)。
+## 仓库内容
 
-五个仓库的职责、架构图、耦合边界与修改影响，见 [PhotoPainter 架构总览](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/docs/01-overview.md)。
+| 路径 | 内容 |
+|---|---|
+| `main/` | photoframe 应用入口和图片事务协议的实现 |
+| `components/photoframe/` | PNG 解码与六色校验；旧 ABI 1 使用的电子纸驱动 |
+| `components/app_sdk/` | 应用 SDK 头文件 `photopainter_app.h` 和构建辅助脚本，是 `photopainter-host/sdk/` 的副本 |
+| `examples/` | 示例应用：[lifecycle](examples/lifecycle/README.md)、[color-test](examples/color-test/README.md)、[ble-echo](examples/ble-echo/README.md) |
+| `tests/` | 在电脑上运行的原生测试 |
+| `docs/ble-image-input.md` | [图片事务协议](docs/ble-image-input.md)的完整规格 |
 
-**应用开发从 [开发者 Wiki](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/README.md) 开始。** 本仓库维护应用入口、业务输入、图片验证和示例；宿主框架只提供运行、鉴权、更新和通用服务。
+## photoframe 做什么
 
-相框 APP 使用同一事务核心处理 BEGIN/DATA/COMMIT/QUERY/CANCEL、SHA-256、断线/超时清理及完成回执。ABI 2.3 GATT 可用每块 4025 字节图片；ABI 2.2 CoC 大块输入和 ABI 2.1 GATT 小块路径继续兼容。电脑端不使用旧宿主 PNG opcode 作为主路径。协议见 [BLE 收图](docs/ble-image-input.md)，已测范围和剩余问题见 [实机记录](docs/validation-ble-input-2026-10-23.md)。
+photoframe 用 `APP_MANIFEST_CHANNEL` 声明 ABI 2.3，需要支持 ABI 2.3 的宿主固件。
 
-默认 `.app.elf` 已使用 ABI 2：启动时恢复缓存或显示 `WAITING FOR IMAGE`，收到 PNG 后更新屏幕；宿主负责六色逻辑帧的板级显示。必须先部署支持 ABI 2 的新宿主。完整规则见 [运行层指南](https://github.com/M1nt-Ch0c0/photopainter-host/blob/main/docs-runtime-v2.md)。
+- **启动时**：从宿主缓存恢复上一次显示的画面；没有缓存时显示 `WAITING FOR IMAGE` 等待页。
+- **收图**：同时注册三种蓝牙通道（ABI 2.1 GATT 服务、ABI 2.2 CoC、ABI 2.3 通用消息），共用一套图片事务：BEGIN、CHUNK、COMMIT、CANCEL、QUERY。协议规格见 [图片事务协议](docs/ble-image-input.md)。
+- **显示**：COMMIT 时校验 SHA-256，完整解码 PNG 并检查颜色，生成 384000 字节的六色逻辑帧，调用宿主的显示接口。旋转、像素打包和电子纸时序都由宿主完成。
+- **完成回执**：显示接口在屏幕刷新完成并断电后才返回，photoframe 随后生成完成回执，同时把这一帧写进缓存。
 
-## 构建与安装
+PNG 必须满足：
 
-SDK 包含 ABI 2.1 GATT、ABI 2.2 CoC 和 ABI 2.3 通用消息；默认相框使用 `APP_MANIFEST_CHANNEL` 声明 2.3，需要配套宿主，旧 2.0/2.1/2.2 应用继续兼容。需要应用自定义蓝牙服务时使用 `APP_MANIFEST_BLE`，参考 [BLE 回显示例](examples/ble-echo/README.md)。宿主保存 GATT 描述和数据副本，通过事件交付写入，应用切出时清理服务；应用不直接控制蓝牙协议栈、发现广播或安装通道。
+- 最大 5 MiB；
+- 恰好 800×480，非隔行；
+- 每个像素完全不透明，只用黑 `#000000`、白 `#ffffff`、黄 `#ffff00`、红 `#ff0000`、蓝 `#0000ff`、绿 `#00ff00` 六种颜色；
+- PNG 结束后没有多余数据。
 
-本仓库为 7.3 英寸、800×480、六色 Spectra 6 PhotoPainter 提供独立可加载组件，不是整机固件。使用 ESP-IDF commit `5e6f53cdb31fe5708eae3f55af9737be2822db22`（约 v6.0.3），分别构建应用 ELF 与共享对象：
+photoframe 只负责收图和显示。蓝牙协议栈、配对与鉴权、应用安装和更新都由宿主固件负责。电脑端怎样推图见 [电脑端、控制台与网页插件](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/docs/07-clients.md)，各组件的当前版本见 [版本与已知限制](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/docs/09-versions-and-limits.md)。
+
+## 构建
+
+ESP 产物必须用固定的 ESP-IDF 提交 `5e6f53cdb31fe5708eae3f55af9737be2822db22`（v6.0.3）构建。`CMakeLists.txt` 会检查 `$IDF_PATH` 的提交，不一致直接报错。环境准备见 [编写一个应用](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/docs/04-writing-an-app.md#准备环境)。
 
 ```sh
 . /path/to/esp-idf/export.sh
-
-idf.py -B build-app -DIDF_TARGET=esp32s3 \
-  -DPHOTOFRAME_ARTIFACT=app build
-idf.py -B build-so -DIDF_TARGET=esp32s3 \
-  -DPHOTOFRAME_ARTIFACT=so build
+idf.py -B build-app -DIDF_TARGET=esp32s3 -DPHOTOFRAME_ARTIFACT=app build
 ```
 
-产物为 `build-app/photoframe.app.elf` 与 `build-so/photoframe.so`。`main/idf_component.yml` 从 Espressif Component Registry 解析 `espressif/elf_loader: ^1.3.3` 与 `espressif/libpng: ^1.6.58~1`；`dependencies.lock` 固定本次解析结果，其中 elf_loader 为 1.3.3。依赖不 fork、不 vendor。
+产物是 `build-app/photoframe.app.elf`。构建目录里的普通 `.bin` 是构建副产品，不能刷进设备。
 
-业务 app ELF 通过宿主的独立 A/B 槽更新，ABI 兼容时无需重建或刷写主程序。不要刷写组件构建目录内的普通 `.bin`。打包、上传、试运行及回退步骤见 [宿主双槽说明](https://github.com/M1nt-Ch0c0/photopainter-host/blob/main/docs-module-slots.md)。
+依赖从 Espressif Component Registry 获取，`main/idf_component.yml` 声明版本范围，`dependencies.lock` 锁定为 `espressif/elf_loader` 1.3.3、`espressif/libpng` 1.6.58~1。
 
-本机解码与打包测试：
+构建选项：
+
+| 选项 | 取值 | 说明 |
+|---|---|---|
+| `PHOTOFRAME_ARTIFACT` | `app`（默认）或 `so` | 构建应用 ELF，或旧的共享对象 `photoframe.so` |
+| `PHOTOFRAME_ABI` | `2`（默认）或 `1` | `1` 构建旧 ABI 1 应用；`so` 产物固定为 ABI 1 |
+
+## 安装到设备
+
+用宿主仓库的打包工具把 ELF 打成 `.pkg`，再用 `ai-quota-frame` 命令行或网页插件的开发者工具上传并激活。下面假设 `photoframe` 和 `photopainter-host` 是兄弟目录：
+
+```sh
+cd photopainter-host
+python3 tools/module.py package --version 21 \
+  --input ../photoframe/build-app/photoframe.app.elf \
+  --output /tmp/photoframe-21.pkg
+
+ai-quota-frame ble install  --file /tmp/photoframe-21.pkg
+ai-quota-frame ble activate --app photoframe
+```
+
+`--version` 是发布号，用一个和设备上已有版本区分得开的数字。`install` 把包写进 photoframe 的备用槽，`activate` 试运行新版本，首屏成功后确认。完整说明，包括网页插件开发者工具的用法，见 [编写一个应用](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/docs/04-writing-an-app.md#第五步装到设备上)。
+
+## 测试
+
+原生测试在电脑上运行，不需要设备和 ESP-IDF，需要 CMake、C 编译器、libpng 和 Python 3：
 
 ```sh
 cmake -S tests -B tests/build
@@ -45,21 +86,29 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 python3 -m unittest discover -s examples/color-test -p 'test_*.py'
 ```
 
-显示引脚和 E6 初始化、刷新、关断时序取自 Waveshare [`ESP32-S3-PhotoPainter` commit `a5e8f757`](https://github.com/waveshareteam/ESP32-S3-PhotoPainter/tree/a5e8f757ba0cafbb5586f07d3e83bda3184c0845/01_Example/xiaozhi-esp32)。SCLK/MOSI/DC/CS/RST/BUSY 固定为 GPIO 10/11/8/9/12/13；AXP2101 通过 GPIO 48/47 上的 I2C0 验证芯片 ID，配置并回读 ALDO4 3.3 V 后才允许访问 EPD GPIO/SPI。上游 MIT notice 保存在 `LICENSES/Waveshare-PhotoPainter-MIT.txt`，本仓库原创代码使用 `LICENSE` 中的 MIT 许可。
+| 测试 | 内容 |
+|---|---|
+| `tests/test_photoframe.c` | PNG 解码和校验，以及旧驱动的 180° 像素打包 |
+| `tests/test_ble_image.c` | 用真实的应用入口和解码器、模拟的宿主服务，测试图片事务在三种通道上的行为 |
+| `tests/test_app_entry.py` | 启动时的缓存恢复和等待页、INPUT 事件、缓存写入失败的处理 |
+| `examples/ble-echo/test_entry.c` | ble-echo 示例的入口 |
+| `examples/color-test/test_entry.py` | color-test 示例两种色条顺序的画面 |
 
-## 推图
+测试里的显示接口都是替身。改动收图或显示逻辑后，还需要在设备上推一张图，确认拿到完成回执，并人工检查屏幕的内容、方向和颜色。
 
-默认BLE优先由本APP的ABI 2.2 CoC接收，旧电脑端仍可使用其GATT兼容服务；电脑端命令为 `ai-quota-frame ble push --file frame.png`，常驻服务设置 `PHOTOFRAME_PUSH_TRANSPORT=ble`。服务 UUID、分块与回执契约见 [应用协议](docs/ble-image-input.md)。旧专用 BLE PNG 通道仅作兼容实现；v2 宿主旧 token HTTP 控制入口已退役为 410。所有路径都不能抢占当前应用；发现、鉴权和 OTA 始终由宿主提供。命令见 [电脑端指南](https://github.com/M1nt-Ch0c0/ai-quota-frame/blob/main/docs/ble.md)。
+## 旧接口：ABI 1 和共享对象
 
-共享对象公开 ABI：
+默认的 ABI 2 应用不直接操作硬件。ABI 1 应用和 `photoframe.so` 是早期接口，为兼容保留，它们自带电子纸驱动，由 `components/photoframe/` 实现。
+
+共享对象只导出一个函数：
 
 ```c
 int photoframe_render_png(const uint8_t *png_data, size_t png_size);
 ```
 
-宿主必须串行调用；输入在返回前保持有效。PNG 不得超过 5 MiB，必须恰好 800×480、非隔行，并且每个像素只能是完全不透明的黑 `#000000`、白 `#ffffff`、黄 `#ffff00`、红 `#ff0000`、蓝 `#0000ff`、绿 `#00ff00`。组件会完整解码、验色并拒绝尾随数据，然后执行 180° 像素打包；验证失败不会接触面板。成功仅在最终 POWER_OFF 的 BUSY 等待完成后返回。
+调用方必须串行调用，输入在返回前保持有效。函数先完整解码和校验 PNG，校验通过后才访问电源芯片和屏幕，旋转 180° 后刷新，等最终 POWER_OFF 的 BUSY 信号结束才返回。
 
-仅旧 ABI 1（显式 `-DPHOTOFRAME_ABI=1` 构建）由宿主解析下列三个符号。默认 ABI 2 使用 `components/app_sdk/include/photopainter_app.h` 的事件与宿主服务，PNG 解码后生成 384000 字节逻辑帧，由宿主执行唯一的旋转和硬件刷新：
+ABI 1 应用由宿主提供下面三个符号。`photoframe_host_report_result()` 用来回报结果，因为 elf_loader 1.3.3 的 `esp_elf_request()` 不传递入口函数的返回值：
 
 ```c
 const uint8_t *photoframe_host_png_data(void);
@@ -67,25 +116,30 @@ size_t photoframe_host_png_size(void);
 void photoframe_host_report_result(int result);
 ```
 
-必须实现结果回调，因为 elf_loader 1.3.3 的 `esp_elf_request()` 不传播入口返回值。稳定结果码如下：
+结果码：
 
 | 值 | 名称 | 含义 |
 |---:|---|---|
-| `0` | `PHOTOFRAME_OK` | 刷新及最终关断等待完成 |
-| `-1` | `PHOTOFRAME_ERR_ARGUMENT` | 空或超限输入 |
-| `-2` | `PHOTOFRAME_ERR_PNG` | PNG 解码或结构错误 |
-| `-3` | `PHOTOFRAME_ERR_GEOMETRY` | 尺寸错误或隔行 PNG |
-| `-4` | `PHOTOFRAME_ERR_COLOR` | 存在六色以外或非不透明像素 |
-| `-5` | `PHOTOFRAME_ERR_ALLOCATION` | 面板 I/O 前的组件内存分配失败 |
-| `-6` | `PHOTOFRAME_ERR_IO` | AXP2101、I2C、GPIO、SPI、初始化或清理失败 |
-| `-7` | `PHOTOFRAME_ERR_BUSY_TIMEOUT` | 低有效 BUSY 未在 120 秒内恢复高电平 |
+| `0` | `PHOTOFRAME_OK` | 刷新完成，屏幕已断电 |
+| `-1` | `PHOTOFRAME_ERR_ARGUMENT` | 输入为空或超过 5 MiB |
+| `-2` | `PHOTOFRAME_ERR_PNG` | PNG 解码失败或结构错误 |
+| `-3` | `PHOTOFRAME_ERR_GEOMETRY` | 尺寸不是 800×480，或是隔行 PNG |
+| `-4` | `PHOTOFRAME_ERR_COLOR` | 有六色以外的像素，或像素不是完全不透明 |
+| `-5` | `PHOTOFRAME_ERR_ALLOCATION` | 访问屏幕前内存分配失败 |
+| `-6` | `PHOTOFRAME_ERR_IO` | 电源芯片、I2C、GPIO 或 SPI 的初始化或清理失败 |
+| `-7` | `PHOTOFRAME_ERR_BUSY_TIMEOUT` | BUSY 信号 120 秒内没有恢复 |
 
-## 鉴权
+### 硬件细节
 
-组件不保存密钥，也不实现网络鉴权。v2 的物理配对、BondAuth 和 BLE HMAC 只由宿主校验；旧 HTTP Bearer 仅属于历史 v1 固件。宿主检查鉴权和请求大小后，才把内存缓冲区交给本组件，完整 PNG 验证由组件在触碰面板前完成。当前 BLE 完成回执只在实体刷新和最终 POWER_OFF 等待结束后返回，仍需人工确认显示效果。不得把 Wi-Fi 密码、推图码、NVS 镜像或其他密钥提交到此仓库。
+- 屏幕引脚：SCLK 10、MOSI 11、DC 8、CS 9、RST 12、BUSY 13。
+- 电源芯片 AXP2101 通过 I2C0（SCL 48、SDA 47）访问。驱动先核对芯片 ID，再把 ALDO4 设为 3.3 V 并回读确认，之后才访问屏幕。
+- 依据 [官方原理图](https://files.waveshare.com/wiki/ESP32-S3-PhotoPainter/ESP32-S3-PhotoPainter-Schematic.pdf)：ALDO4（pin 15）接 `EPD_VCC`，ALDO3（pin 16）接 `Audio_VCC`。ALDO4 电压寄存器为 `0x95`，使能位是 `0x90` 的 bit 3；修改时读改写，保留其他电源位。
+- 屏幕的初始化、刷新和关断时序取自 Waveshare [`ESP32-S3-PhotoPainter`](https://github.com/waveshareteam/ESP32-S3-PhotoPainter/tree/a5e8f757ba0cafbb5586f07d3e83bda3184c0845/01_Example/xiaozhi-esp32) 示例。
 
-电源映射依据：[官方原理图](https://files.waveshare.com/wiki/ESP32-S3-PhotoPainter/ESP32-S3-PhotoPainter-Schematic.pdf)中 AXP2101 的 pin 15 / ALDO4 连接 `EPD_VCC`，pin 16 / ALDO3 连接 `Audio_VCC`。屏幕电压寄存器为 `0x95`，使能为 `0x90` 的 bit 3；读改写保留其他电源位。
+## 安全
 
-## 独立第二应用示例
+本仓库不保存任何密钥，photoframe 也不实现鉴权。不要提交 Wi-Fi 密码、配对凭据、NVS 镜像或设备备份。
 
-[color-test](examples/color-test/README.md) 是独立构建和安装的六色色条应用，可用于验证多个应用各自的 A/B 更新、切换与回退。它在 START 自主绘制色带，使用宿主显示服务，不接受 PNG，也不修改原 photoframe 入口。另有 [无显示生命周期示例](examples/lifecycle/README.md)。
+## 许可
+
+本仓库的原创代码使用 [MIT 许可](LICENSE)。取自 Waveshare 示例的部分保留其 MIT 声明，见 `LICENSES/Waveshare-PhotoPainter-MIT.txt`。

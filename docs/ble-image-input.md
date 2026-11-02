@@ -1,129 +1,185 @@
-# photoframe BLE 图片输入 v1
+# photoframe 图片事务协议
 
-2026-10-29：v21 增加 ABI 2.3 通用消息通道，三条适配器共用纯 C 图片事务核心；旧 GATT/CoC 及 PFI1 回执格式保持兼容。新 GATT 每个应用消息可携带 4025 B 图片，一次交换直接返回累计偏移。实机手机 Web GATT 67,626 B 上传 7.9 秒，刷新 20.3 秒，签名完成回执和人眼确认通过。精确接口见 [宿主 ABI 2.3](https://github.com/M1nt-Ch0c0/photopainter-host/blob/main/docs/abi-2-3-channel.md)。本轮没有手机原生 CoC / Wi-Fi 验收。
+这一页是相框应用 photoframe 接收图片的协议规格，写给要实现客户端或修改 photoframe 收图代码的开发者。读完你会知道每条命令和 64 字节回执的字节格式、事务的状态规则，以及三种蓝牙承载方式各自的差别。
 
+蓝牙连接、配对、会话鉴权和管理命令由宿主固件负责，见 [蓝牙通信](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/docs/06-bluetooth.md)。那一页的“图片事务”一节从客户端角度介绍了同一协议，包括回执丢失后为什么只能查询、不能重发；本页是以源码为准的完整规格。
 
-**2026-10-29 配对 v2：尚未实机验证。** 宿主负责新的六位码、功能键批准、持久 owner 和长按重置；PFI1 业务版本仍为 1，APP ABI 仍为 2.2。客户端先完成 BondAuth，再使用本文协议。图片待确认事务还须钉住配对 BID，换绑后不能恢复旧 owner 的事务。完整字节合同见 [host 配对 v2](https://github.com/M1nt-Ch0c0/photopainter-host/blob/main/docs/ble-pairing-v2.md)。
+## 概览
 
-当前实现使用 ABI 2.2，功能提交 `e373687` 已推送 main，新增单所有权 L2CAP CoC，保留原 ABI 2.1 GATT 图片协议。
-相框 ELF 拥有 PNG 缓冲、SHA-256、收图状态和近期回执；宿主提供鉴权、队列、唯一
-App Manager 和同步显示。新 APP 需要配套 ABI 2.2 宿主；分区表和安装包格式不变。
-旧宿主图片 opcode 15/16/17 保留，电脑端主路径不使用它们。
+photoframe 自己负责收图：它保存 PNG 缓冲、计算 SHA-256、维护接收状态，并在屏幕刷新完成后生成完成回执。宿主提供鉴权、事件调度和同步显示接口。
 
-## ABI 2.2 CoC 扩展（2026-10-27）
+| 源文件 | 内容 |
+|---|---|
+| `main/image_protocol.h` | 常量：opcode、state、error、5 MiB 上限、60 秒空闲期限 |
+| `main/image_transfer.c` | 事务核心：解析命令、维护状态、生成回执。不涉及任何传输细节 |
+| `main/ble_image.c` | 三个承载适配器（GATT、CoC、通用消息）、1 秒定时器、PNG 解码和显示 |
+| `main/entry.c` | 应用入口：清单、START 首屏、事件分发 |
 
-APP 使用 `APP_MANIFEST_COC`，START 注册 4096 字节 SDU 预算及 RX/TX 各四槽的唯一 CoC。
-既有 GATT 命令和 64 字节 `PFI1` 回执继续有效；CoC 内使用相同图片命令，不改业务版本号。
-宿主无线封套和密钥属于宿主，见兄弟仓 `photopainter-host/docs/abi-2-2-coc.md`。
+三种承载方式共用同一个事务核心，命令和回执格式完全相同。
 
-- BEGIN、COMMIT、CANCEL、QUERY：各返回一条相同的 64 字节业务回执。
-- DATA/CHUNK：最大图片部分为协商应用记录上限减 22；典型 4058 字节记录可传 4036 字节图片。
-- 成功 CHUNK 不返回逐块回执，依靠 CoC credits 施加背压；错误 CHUNK 的失败结果保留至 COMMIT/QUERY。
-- 每次 APP_EVENT_COC 最多处理四条记录；发送队列满时保留待发回执，等待 TX_READY，避免阻塞 Manager。
-- GATT 和 CoC 共用同一图片接收状态；接收中的图片绑定入口/session，另一入口不能覆盖它。
-- CoC 断线取消尚未提交的接收，保留近期终态回执。COMMIT 已进入显示时，断线不取消显示；重新连接只能 QUERY 原请求。
-- 原有整图长度/SHA/PNG 检查、最多 5 MiB、60 秒接收空闲期限和最终 POWER_OFF 成功语义不变。
+photoframe 用 `APP_MANIFEST_CHANNEL` 声明 ABI 2.3，所以需要支持 ABI 2.3 的宿主。协议本身的版本号是命令里的 `version` 字段，当前为 1；回执以 ASCII `PFI1` 开头。
 
-2026-10-27 已在v20取得一次真实CoC回执：67,509字节发送阶段2.477秒，随后物理刷新与POWER_OFF完成。发送阶段均速26.6 KiB/s，不含全部连接和刷屏时间；不是完整稳定性验收，详细记录见项目Wiki状态页。
+## 命令格式
 
-## 原 GATT 协议
+所有整数都是小端序。每条命令的结构：
 
-## 服务与传输
+| 偏移 | 字节 | 字段 |
+|---:|---:|---|
+| 0 | 1 | `version`，固定为 1 |
+| 1 | 1 | `opcode` |
+| 2 | 16 | `request_id`，客户端生成的非零随机值 |
+| 18 | 可变 | `tail`，内容取决于 opcode |
 
-仅运行新版 `photoframe` 时注册服务 `a4fe2000-1536-4c88-a2ce-32ecdaac0471`：
+| opcode | 命令 | tail | 命令总长 |
+|---:|---|---|---|
+| 1 | BEGIN | `png_size:u32`，`sha256:32` | 恰好 54 字节 |
+| 2 | CHUNK | `offset:u32`，`data`（至少 1 字节） | 至少 23 字节，上限见[三种承载方式](#三种承载方式) |
+| 3 | COMMIT | 空 | 恰好 18 字节 |
+| 4 | CANCEL | 空 | 恰好 18 字节 |
+| 5 | QUERY | 空 | 恰好 18 字节 |
 
-| 索引 | UUID 前缀 | 属性 | 最大值 |
-|---|---|---|---:|
-| 0 | `a4fe2001` | WRITE，命令 | 128 字节 |
-| 1 | `a4fe2002` | READ，当前命令结果 | 64 字节 |
+`request_id` 代表一次推图意图。客户端每推一张图都生成新的 ID，同一张图重新推送也用新 ID。
 
-后缀均为 `-1536-4c88-a2ce-32ecdaac0471`。电脑先通过常驻通道使用已批准的关系完成 BondAuth 双向 HMAC 鉴权，
-核对运行应用 ID、服务 UUID、代次和服务版本，再以既有签名 op 14 写命令、op 13 读结果。
-直接 GATT 读值没有协议 HMAC，不作为物理成功证据。发现、鉴权和应用 OTA 不依赖此服务。
+## 64 字节回执
 
-所有整数是 little endian。每条命令为 `version:u8=1, opcode:u8, request_id:16, tail`。
-ID 为电脑生成的非零随机 128 位值。单连接串行执行命令，写完立即签名读取状态。
+每条命令处理完都产生一份 64 字节回执：
 
-| opcode | 含义 | tail |
-|---:|---|---|
-| 1 | BEGIN | `png_size:u32, sha256:32`，总长 54 |
-| 2 | CHUNK | `offset:u32, data:1..106`，总长 23..128 |
-| 3 | COMMIT | 空，总长 18 |
-| 4 | CANCEL | 空，总长 18 |
-| 5 | QUERY | 空，总长 18；查相同 ID 的接收状态或完成回执 |
-
-PNG 长度为 8..5242880；最终必须是非隔行 800×480 PNG，每个像素完全不透明，
-且只使用精确黑、白、黄、红、蓝、绿。复用原 libpng 解码器，完整解码、验色和检查尾随数据后，
-才调用 `app_host_display_v2`。SHA-256 是 APP 内 MIT 实现，按新接纳的数据块增量计算，
-不增加 SHA 宿主导入，也不在普通事件中扫描整份 5 MiB 缓冲。
-
-BEGIN 相同 ID、长度和摘要会返回已有接收进度或已有终态；同 ID 不同元数据拒绝。
-仅允许一个接收请求，另一 ID 的 BEGIN 返回 busy。新块必须从 received 位置追加；
-完全落在已接收范围内、内容相同的重复块可接受。空块、空洞、部分重叠、冲突重复和越界拒绝，
-不修改已接收字节。COMMIT 必须收齐且 SHA 匹配。重复 COMMIT 只能返回保留的原终态，不能再次刷新。
-
-## 64 字节结果
-
-| 偏移 | 字节数 | 字段 |
+| 偏移 | 字节 | 字段 |
 |---:|---:|---|
 | 0 | 4 | ASCII `PFI1` |
-| 4 | 1 | state |
-| 5 | 1 | 本次回复的 opcode，初始为 0 |
-| 6 | 2 | error |
-| 8 | 16 | request ID |
+| 4 | 1 | `state` |
+| 5 | 1 | `opcode`，产生这份回执的命令；初始状态为 0 |
+| 6 | 2 | `error`，`u16` |
+| 8 | 16 | `request_id` |
 | 24 | 4 | PNG 总长度 |
 | 28 | 4 | 已接收长度 |
-| 32 | 32 | PNG SHA-256 |
+| 32 | 32 | PNG 的 SHA-256 |
 
-state：0 idle、1 receiving、2 processing、3 complete、4 failed、5 canceled、
-6 missing、7 rejected。只有 **complete + error 0 + ID/长度/摘要完全匹配 + received=total**
-证明此请求物理刷新及最终 POWER_OFF 成功。普通签名 WRITE 成功只证明事件执行完成。
-rejected 为本命令被拒绝，仍在接收的请求保持原样；其长度和摘要为零，不能当作完成回执。
-missing 的 ID 是查询 ID，其余元数据为零。
+`state` 的取值：
 
-error：0 OK、1 invalid command、2 busy、3 offset、4 conflict、5 memory、6 SHA mismatch、
-7 invalid PNG、8 display failure、9 timeout、10 disconnected。应用协议错误通过结果返回，
-BLE 事件本身正常完成，不因坏输入卸载应用。宿主鉴权/代次/接纳错误仍使用宿主既有错误码。
+| 值 | 名称 | 含义 |
+|---:|---|---|
+| 0 | idle | 还没有任何事务 |
+| 1 | receiving | 正在接收 |
+| 2 | processing | 已收齐并通过 SHA 校验，正在解码和刷新屏幕 |
+| 3 | complete | 屏幕刷新完成 |
+| 4 | failed | 失败，`error` 说明原因 |
+| 5 | canceled | 已取消 |
+| 6 | missing | 找不到这个 ID 的事务或回执 |
+| 7 | rejected | 这一条命令被拒绝；正在进行的事务不受影响 |
 
-## 生命周期与并发
+`error` 的取值：
 
-- BEGIN 用 allowlist 的 `malloc` 申请输入；部署宿主配置 `SPIRAM_USE_MALLOC=y`、
-  `SPIRAM_MALLOC_ALWAYSINTERNAL=512`，大分配优先 PSRAM，可失败。5 MiB 的实际归属须用实机堆差验证。
-  输入在 COMMIT 解码和同步显示返回前保持有效；完成后释放。逻辑帧和可选缓存使用原有路径。
-- 每秒定时检查最近一次有效 BEGIN/CHUNK；空闲达到 60 秒则 canceled/timeout 并释放。
-  查询不延长接收租期。CONNECTED 和 DISCONNECTED 都释放未提交接收，以覆盖宿主合并连接边界的情况。
-- 同步显示期间断开不会取消已执行的 COMMIT。结果在显示接口返回后写入四项 RAM 环形回执。
-  回执跨连接保留，STOP、错误卸载、切换、重启和四项终态淘汰可使其消失。
-- STOP 释放输入、清除回执、取消计时并注销服务。宿主取消旧代次事件并在释放 ELF 前销毁服务副本。
-  服务发布失败通过 ERROR 清理 APP 资源后返回运行错误。
-- 每条 BLE 写入和显示都由唯一 App Manager 串行执行。收图不跨事件占住宿主接纳锁，
-  功能键/管理切出仍可执行，随后 STOP 清理；包接收可能临时阻止 APP 事件，APP 超时在下一事件处理。
-  定时与网络事件不显示。APP 的 ABI INPUT(PNG) 兼容入口仍保留，接收 BLE 时拒绝并发 INPUT；这不表示 v2 宿主仍接受旧 HTTP。v2 的旧 token HTTP 路由返回 410；A/B 与启动保护保持原合同。
+| 值 | 名称 | 典型原因 |
+|---:|---|---|
+| 0 | OK | 成功 |
+| 1 | invalid | 命令长度、版本或 opcode 不对；ID 全为零；PNG 长度超出范围 |
+| 2 | busy | 已有另一个 ID 或另一个承载通道在接收 |
+| 3 | offset | CHUNK 偏移不对或越界；COMMIT 时还没收齐 |
+| 4 | conflict | 同 ID 的 BEGIN 长度或摘要不同；重复块内容不一致；对没有接收中事务的 ID 发 CHUNK、COMMIT 或 CANCEL |
+| 5 | memory | BEGIN 申请缓冲失败，或解码时内存不足 |
+| 6 | SHA mismatch | COMMIT 时整图 SHA-256 与 BEGIN 声明的不一致 |
+| 7 | invalid PNG | PNG 结构、尺寸、隔行或颜色不合格，或 PNG 结束后还有多余数据 |
+| 8 | display failure | 宿主显示接口返回失败 |
+| 9 | timeout | 60 秒没有新的 BEGIN 或 CHUNK |
+| 10 | disconnected | 接收中途连接断开 |
 
-## 客户端恢复规则
+**怎样判断图片已经显示。** 只有同时满足下面四条的回执，才说明这张图已经刷到屏幕上：`state` 为 3；`error` 为 0；`request_id`、总长度、SHA-256 与请求一致；已接收长度等于总长度。这份回执在宿主显示接口返回之后才生成，而宿主要等电子纸刷新完成并断电（POWER_OFF）才返回，一次刷新大约 20 秒。
 
-Mac/Windows/Linux 新图片发送使用 `NewAppImageSender`，保持单 worker、最新快照、去重和错误节流。
-相框未运行或服务不匹配时明确不可用，不切应用、不回退 HTTP、不改用宿主图片协议。
-COMMIT 前连接失败可用新随机 ID 整图重传。尝试 COMMIT 前就保存身份；COMMIT 写入或结果读取丢失时，
-重连核对原代次和服务版本，只 QUERY 原 ID，不能重发 COMMIT。
-切出/重启、missing、不一致回执都使该图片结果不确定，停止该进程对该摘要的自动重试，
-即使中间有新快照也保留此决定。状态仅在 RAM，不承诺跨电脑进程重启的永久 exactly-once。
+`rejected` 回执只带 `request_id`（命令太短无法解析时为零）、`opcode` 和 `error`，长度和摘要字段为零。`missing` 回执只带查询的 `request_id`。这两种回执都不代表事务结束。
 
-## ABI 审计证据
+## 事务规则
 
-宿主 `b4709c0` 的 `main/app_ble.c` 复制描述和值，连接边界丢弃旧队列并保留边界事件；
-`main/ble_protocol.c` 的 op 13/14 在共享接纳锁内调用；`main/ble_transport.c` 等待
-`app_manager_ble_flush()`；`main/app_manager.c` 只在管理任务交付事件；
-`main/app_services.c` 的显示接口同步等待硬件并延长看门狗，服务关闭取消 BLE 和 timer；
-`main/photoframe_plugin.c` 在 STOP 返回后清理宿主副本再卸载 ELF。
-上述已有能力足够，此次未发现必须扩展宿主的缺项。SDK 副本保持 byte-identical。
+同一时间只有一个事务在接收。一个事务从 BEGIN 开始，以 complete、failed 或 canceled 结束，结束时的回执叫**终态回执**。
 
-原生测试命令：`cmake -S tests -B tests/build && cmake --build tests/build && ctest --test-dir tests/build --output-on-failure`。
-同套测试另以 ASan/UBSan 编译执行。`test_ble_image.c` 使用真实 APP 入口和 libpng，
-验证 SHA 标准向量、百万个 a、分块、重入、HTTP 冲突、断线/超时/STOP/ERROR 释放、
-重复 COMMIT、尾随数据和显示失败；原解码器六色、透明、尺寸及隔行回归仍保留。
-实际部署与内存证据另记验收记录，不能用原生 mock 显示成功代替实机和人工目测。
+### BEGIN
 
-## 2026-10-29 离线测试补齐
+- PNG 长度必须在 8 字节到 5 MiB（5242880 字节）之间。
+- 新 ID：photoframe 按 PNG 长度申请缓冲，回执为 `receiving`，已接收长度为 0。缓冲申请失败时回 `rejected` + memory。
+- 另一个 ID 正在接收：回 `rejected` + busy。
+- 同一 ID 再次 BEGIN（正在接收，或已有终态回执）：长度和摘要都一致时，返回当前进度或原终态回执；不一致时回 `rejected` + conflict。正在接收的同 ID BEGIN 会重新开始 60 秒空闲计时。
 
-原生测试已适配实际 ABI 2.2，补齐 CoC host 服务模型，使用真实应用收图器与 libpng 覆盖大块接收、TX 背压、GATT/CoC 竞争、会话不匹配、断线清理、匹配完成回执及重复 COMMIT 不再次显示。首屏/缓存的独立测试仅隔离业务收图层，不替代上述真实收图测试。所有显示回调均为本机测试替身，**尚未实机验证**。
+### CHUNK
+
+- 只接受正在接收的那个 ID，其他 ID 回 `rejected` + conflict。
+- `offset` 必须小于或等于已接收长度，并且 `offset + 数据长度` 不超过总长度，否则回 `rejected` + offset。
+- `offset` 等于已接收长度时追加数据，已接收长度随之增加，SHA-256 增量更新。
+- `offset` 小于已接收长度时视为重复块：数据必须整块落在已接收范围内且内容完全一致，这时接受但进度不变；否则回 `rejected` + conflict。
+- 被拒绝的块不会改动已接收的字节。
+
+### COMMIT
+
+1. 已有这个 ID 的终态回执时，直接返回它。重复 COMMIT 不会再刷一次屏幕。
+2. 没有正在接收的同 ID 事务：回 `rejected` + conflict。
+3. 还没收齐：回 `rejected` + offset，事务继续接收。
+4. SHA-256 不匹配：事务结束，终态为 failed + SHA mismatch。
+5. 校验通过后状态变为 `processing`，并立即写进 GATT 回执特征，客户端在刷新期间能读到这个状态。
+6. 完整解码 PNG。图片必须是 800×480、非隔行、每个像素完全不透明，只用精确的黑 `#000000`、白 `#ffffff`、黄 `#ffff00`、红 `#ff0000`、蓝 `#0000ff`、绿 `#00ff00`，并且 PNG 结束后没有多余数据。不合格时终态为 failed + invalid PNG，屏幕不刷新。
+7. 调用宿主显示接口。成功时终态为 complete，并把这一帧存进宿主为应用保留的缓存，下次启动时恢复；失败时终态为 failed + display failure。
+
+### CANCEL 和 QUERY
+
+- CANCEL 只作用于正在接收的同 ID 事务，终态为 canceled + OK。
+- QUERY 按顺序查找：正在接收的同 ID 事务返回当前进度；否则返回保存的终态回执；都没有就回 `missing`。QUERY 不会延长空闲期限。
+
+### 空闲超时与断线
+
+- photoframe 每秒检查一次。距最近一次 BEGIN 或成功的 CHUNK 满 60 秒时，事务结束，终态为 canceled + timeout，缓冲随即释放。这个计时由应用自己完成，和宿主会话是否断开无关。
+- 宿主报告蓝牙连接建立或断开时，正在接收的事务结束，终态为 canceled + disconnected。CoC 或通用消息通道自身断开时，只取消在这条通道上接收的事务。
+- COMMIT 进入显示后，断开连接不会打断显示。显示结束后终态回执照常保存，客户端重连后用原 ID 发 QUERY 即可取得。
+
+### 终态回执的保存
+
+photoframe 在内存里保留最近 4 份终态回执，跨连接有效。第 5 个事务结束时淘汰最早的一份。应用停止（被切走、相框重启或出错卸载）时，所有回执都会清空。
+
+### 内存
+
+BEGIN 按 PNG 实际长度申请缓冲。宿主把大于 512 字节的内存申请放进 PSRAM，所以图片缓冲不占内部 RAM。事务结束（完成、失败、取消、超时或断线）时缓冲立即释放。
+
+## 三种承载方式
+
+photoframe 在 START 时同时注册三种通道。同一时间只有一个通道能接收图片：一张图正在某个通道（或某个会话）上接收时，其他通道或会话发来的命令回 `rejected` + busy。客户端怎样连接和鉴权，见 [蓝牙通信](https://github.com/M1nt-Ch0c0/esp32s3/blob/main/docs/06-bluetooth.md)。
+
+| | 通用消息（ABI 2.3） | CoC（ABI 2.2） | GATT 服务（ABI 2.1） |
+|---|---|---|---|
+| photoframe 的注册参数 | 服务 ID `a4fe2000-1536-4c88-a2ce-32ecdaac0471`，单条消息最多 4096 字节，回复 64 字节 | 接收 SDU 4096 字节，收发各 4 个缓冲槽 | 服务 `a4fe2000-1536-4c88-a2ce-32ecdaac0471`，两个特征 |
+| 单条命令上限 | 4096 字节；经宿主的 GATT 管理命令承载时最多 4047 字节，即每块 4025 字节图片 | 协商的应用记录上限；常见为 4058 字节，即每块 4036 字节图片 | 128 字节，即每块 106 字节图片 |
+| 哪些命令有回复 | 每条命令一份回执，CHUNK 的回执带累计已接收长度 | 只有 BEGIN、COMMIT、CANCEL、QUERY 回复 | 每次写入后，回执特征更新为最新回执 |
+
+### 通用消息
+
+每收到一条消息，photoframe 处理一条命令，并在同一次交换里回复 64 字节回执，客户端不需要另外读取。
+
+### CoC
+
+CoC（L2CAP 面向连接通道）是一条有序的记录流，比 GATT 快。
+
+- 每个事件最多处理 4 条记录，避免长时间占用宿主的事件队列；剩下的记录在后续事件里处理。
+- 成功的 CHUNK 不回复，靠 CoC 的流控限制发送速度。
+- 本通道正在接收的事务里有 CHUNK 被拒绝时，事务直接结束，终态为 failed，`error` 是那块被拒绝的原因。客户端在 COMMIT 或 QUERY 时会拿到这份回执。
+- 发送队列满时，回执先暂存，等宿主报告可以发送后再发；暂存期间不读取新记录。
+
+### GATT 服务
+
+| 特征 | UUID | 属性 | 最大长度 |
+|---|---|---|---:|
+| 0 | `a4fe2001-1536-4c88-a2ce-32ecdaac0471` | 写，接收命令 | 128 字节 |
+| 1 | `a4fe2002-1536-4c88-a2ce-32ecdaac0471` | 读，最新回执 | 64 字节 |
+
+客户端用宿主的签名写命令（op 14）写特征 0，再用签名读命令（op 13）读特征 1。写入特征 0 以外的特征，或超过 128 字节，回 `rejected` + invalid。每个事件（包括每秒的定时检查）结束时，photoframe 都把最新回执写回特征 1。
+
+## 应用生命周期
+
+| 事件 | photoframe 的处理 |
+|---|---|
+| START | 清空事务状态；依次注册 GATT 服务、写入初始回执、设置 1 秒定时器、打开 CoC、注册通用消息通道，任一步失败都撤销已注册的部分并报告失败。然后从缓存恢复上一帧，没有缓存时显示 `WAITING FOR IMAGE` 等待页 |
+| TIMER | 检查空闲超时，更新 GATT 回执 |
+| BLE、COC、CHANNEL | 交给对应的承载适配器 |
+| INPUT | 宿主兼容图片通道送来的 PNG。正在接收蓝牙图片时返回 `APP_ERR_INPUT`；否则解码、显示并写缓存 |
+| STOP | 关闭三种通道、取消定时器、释放缓冲、清空回执 |
+
+宿主报告 GATT 服务出错时，photoframe 撤销全部通道并返回 `APP_ERR_RUNTIME`。坏命令、坏 PNG 这类协议层错误只体现在回执里，事件本身正常完成，应用不会因此被卸载。
+
+## 测试
+
+原生测试 `tests/test_ble_image.c` 在电脑上编译真实的 `entry.c`、`ble_image.c`、`image_transfer.c` 和 libpng 解码器，用模拟的宿主服务覆盖分块、重复块、SHA 校验、多通道竞争、CoC 背压、断线与超时清理、重复 COMMIT 和显示失败。运行方法见 [README](../README.md#测试)。
